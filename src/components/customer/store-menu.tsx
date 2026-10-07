@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, Check, Clock3, MapPin, Minus, Plus, Search, ShoppingBag, UtensilsCrossed, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowLeft, Check, Clock3, MapPin, Minus, Plus, RotateCcw, Search, ShoppingBag, UtensilsCrossed, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { estimateLine, useCart } from '@/client/cart';
-import { MY_ORDERS_KEY, readJson, writeJson, type SavedOrder } from '@/client/storage';
+import { lastOrderFor, MY_ORDERS_KEY, readJson, writeJson, type SavedOrder } from '@/client/storage';
 import { formatMoney } from '@/lib/domain/misc';
 import { STORE_STATUS_AR } from '@/lib/labels';
 import { brandTextColor } from '@/lib/domain/restaurant-brand';
@@ -16,7 +17,9 @@ const searchable = (value: string) => value.toLowerCase().normalize('NFKD').repl
 export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
   const [menu, setMenu] = useState(initialMenu);
   const slug = menu.restaurant.slug;
-  const { lines, add } = useCart(slug);
+  const router = useRouter();
+  const { lines, add, replace } = useCart(slug);
+  const [lastOrder, setLastOrder] = useState<SavedOrder | null>(null);
   const [selected, setSelected] = useState<PublicMenuProduct | null>(null);
   const closeSheet = useCallback(() => setSelected(null), []);
   const [activeOrder, setActiveOrder] = useState<SavedOrder | null>(null);
@@ -24,6 +27,8 @@ export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
   const [category, setCategory] = useState('all');
   const [notice, setNotice] = useState('');
   const accepting = menu.store.status === 'OPEN' || menu.store.status === 'BUSY';
+  /** Suspended by the platform: browsing only, no cart. */
+  const suspended = menu.store.reason === 'INACTIVE';
   const defaultPoint = menu.deliveryPoints.find((p) => p.isDefault) ?? menu.deliveryPoints[0];
 
   useEffect(() => {
@@ -31,6 +36,7 @@ export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
     if (utm) writeJson('utm:' + slug, utm.slice(0, 64), 'session');
     const recent = readJson<SavedOrder[]>(MY_ORDERS_KEY, []).find((o) => o.slug === slug && Date.now() - o.createdAt < 3 * 3600_000);
     setActiveOrder(recent ?? null);
+    setLastOrder(lastOrderFor(slug, new URLSearchParams(window.location.search).get('reorder')));
     const ctrl = new AbortController();
     const refresh = async () => {
       if (document.hidden || !navigator.onLine) return;
@@ -77,6 +83,24 @@ export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
     add(product.id, variantId, addonIds, qty);
     setNotice('أضفنا ' + product.nameAr + ' للسلة');
   };
+  // "Order it again": only lines that are still valid on today's menu; prices are re-checked by the server.
+  const reorderLines = useMemo(() => (lastOrder?.lines ?? []).filter((l) => estimateLine(menu, { ...l, key: '' }).available), [lastOrder, menu]);
+  const reorderSummary = reorderLines.map((l) => l.quantity + ' × ' + estimateLine(menu, { ...l, key: '' }).name).join('، ');
+  const reorderTotal = reorderLines.reduce((sum, l) => sum + estimateLine(menu, { ...l, key: '' }).total, 0);
+  const reorder = useCallback(() => {
+    if (!reorderLines.length) return;
+    replace(reorderLines);
+    router.push('/s/' + slug + '/checkout');
+  }, [reorderLines, replace, router, slug]);
+  const autoReordered = useRef(false);
+  useEffect(() => {
+    // Arriving from "اطلب نفس الطلب تاني" on the tracking page.
+    if (autoReordered.current || !lastOrder || !accepting) return;
+    if (!new URLSearchParams(window.location.search).has('reorder')) return;
+    autoReordered.current = true;
+    reorder();
+  }, [lastOrder, accepting, reorder]);
+
   const quickAdd = (product: PublicMenuProduct) => {
     if (product.variants.length || product.addonGroupIds.length) setSelected(product);
     else addProduct(product, null, [], 1);
@@ -94,7 +118,7 @@ export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
           </span>
           <span><strong>{menu.restaurant.nameAr}</strong><small>{brand.badgeText || 'طلب مباشر من المطعم'}</small></span>
         </Link>
-        <div className="topbar-status"><span className={'status-dot ' + (accepting ? 'is-open' : 'is-closed')} />{STORE_STATUS_AR[menu.store.status]}</div>
+        <div className="topbar-status"><span className={'status-dot ' + (accepting ? 'is-open' : 'is-closed')} />{suspended ? 'متوقف مؤقتًا' : STORE_STATUS_AR[menu.store.status]}</div>
       </header>
 
       <div className="store-layout">
@@ -120,8 +144,8 @@ export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
 
           {!accepting && (
             <div className="customer-alert" role="status">
-              <strong>{menu.store.status === 'PAUSED' ? 'المطبخ بياخد استراحة قصيرة من الطلبات' : 'المطعم مغلق حاليًا'}</strong>
-              <p>تقدر تختار أكلك وتحفظه في السلة. هنحدّث حالة المطعم تلقائيًا.</p>
+              <strong>{suspended ? 'الطلب أونلاين من المطعم ده متوقف مؤقتًا' : menu.store.status === 'PAUSED' ? 'المطبخ بياخد استراحة قصيرة من الطلبات' : 'المطعم مغلق حاليًا'}</strong>
+              <p>{suspended ? 'تقدر تتفرج على المنيو، والطلب هيرجع أول ما الخدمة تشتغل تاني.' : 'تقدر تختار أكلك وتحفظه في السلة. هنحدّث حالة المطعم تلقائيًا.'}</p>
             </div>
           )}
 
@@ -131,6 +155,18 @@ export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
               <span><small>عندك طلب حديث</small><strong>طلب رقم {activeOrder.orderNumber}</strong></span>
               <span className="active-order-action">تابع طلبك <ArrowLeft size={16} /></span>
             </Link>
+          )}
+
+          {lastOrder && reorderLines.length > 0 && accepting && !suspended && (
+            <section className="reorder-card" aria-label="اطلب نفس طلبك اللي فات">
+              <div>
+                <small>طلبك اللي فات{lastOrder.orderNumber ? ' · ' + lastOrder.orderNumber : ''}</small>
+                <strong>نفس الطلب في ثانية؟</strong>
+                <p>{reorderSummary}</p>
+                {reorderLines.length < (lastOrder.lines?.length ?? 0) && <p>بعض الأصناف مش متاحة النهارده واتشالت.</p>}
+              </div>
+              <button type="button" className="customer-primary-button" onClick={reorder}><RotateCcw size={16} /><span>اطلبه تاني</span><strong>{formatMoney(reorderTotal)}</strong></button>
+            </section>
           )}
 
           {menu.banners.length > 0 && (
@@ -182,7 +218,7 @@ export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
                           <p>{product.descriptionAr || 'حضّر طلبك بالطريقة اللي بتحبها.'}</p>
                           <div className="product-action-row">
                             <strong className="product-price">{product.variants.length > 1 && <small>من </small>}{formatMoney(minPrice)}</strong>
-                            {available ? <button className="product-add-button" onClick={() => quickAdd(product)} aria-label={'إضافة ' + product.nameAr + ' للسلة'}><Plus size={18} /><span>إضافة</span></button> : <span className="product-unavailable-label">غير متاح</span>}
+                            {available && !suspended ? <button className="product-add-button" onClick={() => quickAdd(product)} aria-label={'إضافة ' + product.nameAr + ' للسلة'}><Plus size={18} /><span>إضافة</span></button> : <span className="product-unavailable-label">{suspended ? 'الطلب متوقف' : 'غير متاح'}</span>}
                           </div>
                         </div>
                       </article>
@@ -208,8 +244,8 @@ export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
       </div>
 
       <div className={'cart-toast ' + (notice ? 'is-visible' : '')} role="status" aria-live="polite"><Check size={17} />{notice}</div>
-      {totals.count > 0 && <div className="mobile-cart-bar"><Link href={'/s/' + slug + '/checkout'} className="customer-primary-button"><span className="cart-count">{totals.count}</span><span>مراجعة الطلب</span><strong>{formatMoney(totals.total)}</strong><ArrowLeft size={18} /></Link></div>}
-      {selected && <ProductSheet key={selected.id} menu={menu} product={menu.products.find((p) => p.id === selected.id) ?? selected} onClose={closeSheet} onAdd={(v, a, q) => { addProduct(selected, v, a, q); setSelected(null); }} />}
+      {totals.count > 0 && !suspended && <div className="mobile-cart-bar"><Link href={'/s/' + slug + '/checkout'} className="customer-primary-button"><span className="cart-count">{totals.count}</span><span>مراجعة الطلب</span><strong>{formatMoney(totals.total)}</strong><ArrowLeft size={18} /></Link></div>}
+      {selected && !suspended && <ProductSheet key={selected.id} menu={menu} product={menu.products.find((p) => p.id === selected.id) ?? selected} onClose={closeSheet} onAdd={(v, a, q) => { addProduct(selected, v, a, q); setSelected(null); }} />}
     </main>
   );
 }

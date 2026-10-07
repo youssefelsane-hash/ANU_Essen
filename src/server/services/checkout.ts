@@ -80,7 +80,8 @@ function toQuote(priced: PricedCart, etaMinutes: number): QuoteResponse {
 export async function quote(slug: string, input: { items: CreateOrderInput['items']; promoCode?: string | null; deliveryPointId?: string | null }) {
   const d = db();
   const r = await getRestaurantBySlug(d, slug);
-  if (!r || !r.isActive) throw new AppError('NOT_FOUND', 'المحل غير موجود');
+  if (!r) throw new AppError('NOT_FOUND', 'المحل غير موجود');
+  if (!r.isActive) throw new AppError('STORE_CLOSED', closedMessage('CLOSED', 'INACTIVE'));
   const now = new Date();
   const [{ priced, point }, live] = await Promise.all([priceFor(d, r, input, now), getStoreLive(d, r, now)]);
   const eta = computeEta({ confirmedAt: now, activeLoad: live.load, orderLoad: priced.loadUnits, config: live.config, extraDeliveryMinutes: point.extraMinutes });
@@ -170,7 +171,7 @@ export async function createOrder(slug: string, input: CreateOrderInput, idempot
       if (currentRestaurant.requirePhone && !phone) throw new AppError('VALIDATION', 'رقم الموبايل مطلوب', { field: 'customerPhone' });
       const currentLive = await getStoreLive(tx, currentRestaurant, now);
       if (!acceptsOrders(currentLive.status)) {
-        throw new AppError(currentLive.status === 'PAUSED' ? 'STORE_PAUSED' : 'STORE_CLOSED', closedMessage(currentLive.status));
+        throw new AppError(currentLive.status === 'PAUSED' ? 'STORE_PAUSED' : 'STORE_CLOSED', closedMessage(currentLive.status, currentLive.reason));
       }
       const [method] = await tx.select().from(restaurantPaymentMethods)
         .where(and(eq(restaurantPaymentMethods.restaurantId, r.id), eq(restaurantPaymentMethods.method, input.paymentMethod)));

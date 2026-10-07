@@ -58,7 +58,7 @@ async function request<T>(url: string, init: RequestInit = {}, timeoutMs = 12_00
 }
 
 /** Applies not-yet-acknowledged local actions on top of the server snapshot (optimistic offline state). */
-export function applyPending(order: OrderSnapshot, pending: OutboxEntry[]): OrderSnapshot {
+export function applyPending(order: OrderSnapshot, pending: OutboxEntry[], actorUserId?: string): OrderSnapshot {
   let view = order;
   for (const p of pending) {
     const next = nextStatus(view.status, p.action);
@@ -68,6 +68,7 @@ export function applyPending(order: OrderSnapshot, pending: OutboxEntry[]): Orde
     const paymentStatus = paymentStatusAfter(p.action, view.paymentMethod, view.paymentStatus);
     if (paymentStatus) view = { ...view, paymentStatus };
     if (p.action === 'CANCEL') view = { ...view, cancelReason: p.payload?.reason ?? null };
+    if (p.action === 'OUT_FOR_DELIVERY' && actorUserId) view = { ...view, assignedToUserId: actorUserId };
   }
   return view;
 }
@@ -334,7 +335,7 @@ export class MerchantEngine {
     }
     for (const e of this.outbox) pending[e.orderId] = (pending[e.orderId] ?? 0) + 1;
     const orders = [...this.server.values()]
-      .map((o) => applyPending(o, byOrder.get(o.id) ?? []))
+      .map((o) => applyPending(o, byOrder.get(o.id) ?? [], this.userId))
       .sort((a, b) => a.createdAt - b.createdAt);
     this.set({ orders, pending, outboxCount: this.outbox.length });
   }

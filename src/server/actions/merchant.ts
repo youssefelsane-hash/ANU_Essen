@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { db } from '../db';
-import { addonGroups, addons, products, productVariants, roles, userRoles, users } from '../db/schema';
+import { addonGroups, addons, products, productVariants, roles, sessions, userRoles, users } from '../db/schema';
 import { requireAuth, requirePermission } from '../auth/session';
 import { can } from '../auth/authz';
 import { hashPassword, MIN_PASSWORD_LENGTH } from '../auth/password';
@@ -201,4 +201,39 @@ export async function resetStaffPasswordAction(_prev: ActionState, fd: FormData)
     await audit({ actor: { type: 'USER', userId: auth.user.id, label: auth.user.name }, action: 'staff.password_reset', entity: 'user', entityId: userId, restaurantId });
     return 'تم تغيير كلمة السر';
   });
+}
+
+/** Users who also work in another restaurant (or on the platform) can only be blocked by the platform admin. */
+async function worksElsewhere(userId: string, restaurantId: string): Promise<boolean> {
+  const rows = await db()
+    .select({ restaurantId: userRoles.restaurantId })
+    .from(userRoles)
+    .where(eq(userRoles.userId, userId));
+  return rows.some((r) => r.restaurantId !== restaurantId);
+}
+
+/** Block (or unblock) a staff member: blocked accounts can't sign in and are signed out everywhere immediately. */
+export async function setStaffBlockedAction(restaurantId: string, userId: string, blocked: boolean) {
+  const rid = z.uuid().parse(restaurantId);
+  const uid = z.uuid().parse(userId);
+  const auth = await requirePermission('staff.manage', rid);
+  if (uid === auth.user.id) throw new AppError('FORBIDDEN', 'You cannot block yourself');
+  const [here] = await db().select({ id: userRoles.id }).from(userRoles).where(and(eq(userRoles.userId, uid), eq(userRoles.restaurantId, rid)));
+  if (!here) throw new AppError('NOT_FOUND');
+  if (!can(auth, 'platform.users') && (await worksElsewhere(uid, rid))) {
+    throw new AppError('FORBIDDEN', 'This user also works elsewhere — remove their role here, or ask the platform admin');
+  }
+  await db().update(users).set({ isActive: !blocked, updatedAt: new Date() }).where(eq(users.id, uid));
+  if (blocked) await db().delete(sessions).where(eq(sessions.userId, uid));
+  await audit({
+    actor: { type: 'USER', userId: auth.user.id, label: auth.user.name },
+    action: blocked ? 'staff.blocked' : 'staff.unblocked',
+    entity: 'user',
+    entityId: uid,
+    restaurantId: rid,
+    ...(await requestMeta()),
+  });
+  revalidatePath('/merchant/staff');
+  revalidatePath(`/admin/restaurants/${rid}/staff`);
+  revalidatePath('/admin/users');
 }

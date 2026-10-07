@@ -130,12 +130,14 @@ describe('restaurant isolation and QR routing', () => {
     expect((await loadPublicMenu(d, 'new-raya-menu'))!.restaurant.nameAr).toBe('الاسم الجديد');
   });
 
-  it('rejects invalid IDs, hides inactive stores, and drops untrusted tracking values', async () => {
+  it('rejects invalid IDs, keeps suspended stores reachable with a clear status, and drops untrusted tracking values', async () => {
     expect((await qrRedirect(new NextRequest('https://orders.example.com/q/bad'), { params: Promise.resolve({ id: 'bad' }) })).status).toBe(404);
     const invalidTracking = await qrRedirect(new NextRequest(`https://orders.example.com/q/${restaurantId}?utm_source=bad%20label&next=https://evil.example`), { params: Promise.resolve({ id: restaurantId }) });
     expect(invalidTracking.headers.get('location')).toBe('https://orders.example.com/s/new-raya-menu');
     await d.update(restaurants).set({ isActive: false }).where(eq(restaurants.id, restaurantId));
-    expect((await qrRedirect(new NextRequest(`https://orders.example.com/q/${restaurantId}`), { params: Promise.resolve({ id: restaurantId }) })).status).toBe(404);
-    expect(await loadPublicMenu(d, 'new-raya-menu')).toBeNull();
+    // Printed QR codes keep working while the platform suspends a restaurant: the menu explains it instead of a 404.
+    expect((await qrRedirect(new NextRequest(`https://orders.example.com/q/${restaurantId}`), { params: Promise.resolve({ id: restaurantId }) })).status).toBe(307);
+    const suspended = await loadPublicMenu(d, 'new-raya-menu');
+    expect(suspended?.store).toMatchObject({ status: 'CLOSED', reason: 'INACTIVE' });
   });
 });

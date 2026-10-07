@@ -37,6 +37,11 @@ const COLUMNS: { key: string; title: string; statuses: OrderStatus[]; tone: stri
   { key: 'ready', title: 'جاهز', statuses: ['READY'], tone: 'border-t-green-600' },
   { key: 'delivery', title: 'توصيل', statuses: ['OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE'], tone: 'border-t-purple-600' },
 ];
+/** Delivery staff see only what concerns them: pick up from the kitchen, then deliver. */
+const DELIVERY_COLUMNS: typeof COLUMNS = [
+  { key: 'ready', title: 'جاهز للاستلام من المطبخ', statuses: ['READY'], tone: 'border-t-green-600' },
+  { key: 'delivery', title: 'معايا في الطريق', statuses: ['OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE'], tone: 'border-t-purple-600' },
+];
 const NEW_PRIORITY: Partial<Record<OrderStatus, number>> = { PAYMENT_REVIEW: 0, CREATED: 0, CONFIRMED: 1, AWAITING_PAYMENT: 2 };
 
 function useChime() {
@@ -102,7 +107,9 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
   const chime = useChime();
   const alertRef = useRef<(orders: OrderSnapshot[]) => void>(() => {});
   const [now, setNow] = useState(() => Date.now());
-  const [tab, setTab] = useState('new');
+  const deliveryOnly = permissions.includes('orders.delivery') && !permissions.includes('orders.view') && !permissions.includes('orders.kitchen');
+  const columns = deliveryOnly ? DELIVERY_COLUMNS : COLUMNS;
+  const [tab, setTab] = useState(deliveryOnly ? 'ready' : 'new');
   const [showUnpaid, setShowUnpaid] = useState(false);
   const [reasonFor, setReasonFor] = useState<{ order: OrderSnapshot; action: 'CANCEL' | 'REJECT_PAYMENT' } | null>(null);
   const [printing, setPrinting] = useState<OrderSnapshot | null>(null);
@@ -156,6 +163,16 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
     .sort((a, b) => (b.completedAt ?? b.cancelledAt ?? 0) - (a.completedAt ?? a.cancelledAt ?? 0))
     .slice(0, 8);
 
+  // Courier money: cash to collect on the way + cash collected today (works offline from local data).
+  const dayStart = new Date(Date.now() + state.serverOffset);
+  dayStart.setHours(0, 0, 0, 0);
+  const mine = state.orders.filter((o) => o.assignedToUserId === userId);
+  const onTheWay = mine.filter((o) => o.status === 'OUT_FOR_DELIVERY' || o.status === 'ARRIVED_AT_GATE');
+  const toCollect = onTheWay.filter((o) => o.paymentMethod === 'CASH' && o.paymentStatus !== 'PAYMENT_VERIFIED').reduce((s, o) => s + o.total, 0);
+  const deliveredToday = mine.filter((o) => o.status === 'COMPLETED' && (o.completedAt ?? 0) >= dayStart.getTime());
+  const cashCollected = deliveredToday.filter((o) => o.paymentMethod === 'CASH').reduce((s, o) => s + o.total, 0);
+  const showCourierStrip = perms.has('orders.delivery') && (deliveryOnly || mine.length > 0);
+
   const columnOrders = (statuses: OrderStatus[]) =>
     active
       .filter((o) => statuses.includes(o.status))
@@ -197,9 +214,17 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
         <div className="bg-red-100 px-4 py-2 text-center text-sm font-semibold text-red-800">المطبخ وصل للحد الأقصى — الطلبات الجديدة متوقفة تلقائيًا لحد ما الضغط يخف</div>
       )}
 
+      {showCourierStrip && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 bg-purple-50 px-4 py-2 text-sm text-purple-950">
+          <span>🛵 معاك دلوقتي: <b>{onTheWay.length}</b> طلب</span>
+          <span>حصّل كاش: <b>{formatMoney(toCollect)}</b></span>
+          <span className="text-purple-700">سلّمت النهارده: <b>{deliveredToday.length}</b> · كاش اتحصّل <b>{formatMoney(cashCollected)}</b></span>
+        </div>
+      )}
+
       {/* Mobile tabs */}
       <div className="no-scrollbar flex gap-1 overflow-x-auto bg-white px-2 py-2 shadow-sm lg:hidden">
-        {COLUMNS.map((c) => (
+        {columns.map((c) => (
           <button key={c.key} className={`btn btn-sm shrink-0 ${tab === c.key ? 'btn-dark' : 'btn-ghost'}`} onClick={() => setTab(c.key)}>
             {c.title} ({columnOrders(c.statuses).length})
           </button>
@@ -207,12 +232,12 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
       </div>
 
       {!state.ready ? (
-        <div className="grid flex-1 gap-3 p-3 lg:grid-cols-4">
-          {COLUMNS.map((c) => <div key={c.key} className="skeleton h-64" />)}
+        <div className={`grid flex-1 gap-3 p-3 ${deliveryOnly ? 'lg:grid-cols-2' : 'lg:grid-cols-4'}`}>
+          {columns.map((c) => <div key={c.key} className="skeleton h-64" />)}
         </div>
       ) : (
-        <div className="grid flex-1 gap-3 p-3 lg:grid-cols-4">
-          {COLUMNS.map((c) => {
+        <div className={`grid flex-1 gap-3 p-3 ${deliveryOnly ? 'lg:grid-cols-2' : 'lg:grid-cols-4'}`}>
+          {columns.map((c) => {
             const list = columnOrders(c.statuses);
             const unpaid = c.key === 'new' ? list.filter((o) => o.status === 'AWAITING_PAYMENT') : [];
             const shown = c.key === 'new' ? list.filter((o) => o.status !== 'AWAITING_PAYMENT') : list;
@@ -222,6 +247,19 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
                   {c.title}
                   <span className="badge bg-white text-gray-800">{shown.length}</span>
                 </h2>
+                {c.key === 'ready' && perms.has('orders.delivery') && shown.length > 1 && (
+                  <div className="px-2 pb-2">
+                    <button
+                      className="btn btn-primary w-full"
+                      onClick={async () => {
+                        // Everything goes to the same pickup run; each order is still its own synced action.
+                        for (const o of shown) await act(o, 'OUT_FOR_DELIVERY');
+                      }}
+                    >
+                      🛵 استلمت كل الجاهز ({shown.length}) — خرجوا للتوصيل
+                    </button>
+                  </div>
+                )}
                 <div className="flex-1 space-y-3 overflow-y-auto px-2 pb-3">
                   {shown.map((o) => (
                     <OrderCard
@@ -385,7 +423,7 @@ function TopBar({
             المحل: {STORE_STATUS_AR[store.status]}
           </span>
         )}
-        {canChangeStatus && store && (
+        {canChangeStatus && store && store.reason !== 'INACTIVE' && (
           <div className="flex overflow-hidden rounded-xl ring-1 ring-gray-300">
             {(['OPEN', 'PAUSED', 'CLOSED'] as const).map((s) => (
               <button
@@ -502,6 +540,12 @@ function OrderCard({
         )}
       </div>
 
+      {(o.status === 'READY' || o.status === 'OUT_FOR_DELIVERY' || o.status === 'ARRIVED_AT_GATE') &&
+        (o.paymentMethod === 'CASH' && o.paymentStatus !== 'PAYMENT_VERIFIED' ? (
+          <div className="mt-2 rounded-xl bg-amber-100 px-3 py-2 text-center text-lg font-black text-amber-900">حصّل {formatMoney(o.total)} كاش</div>
+        ) : (
+          <div className="mt-2 rounded-xl bg-green-50 px-3 py-1.5 text-center text-sm font-bold text-green-800">مدفوع ✓ — متحصّلش فلوس</div>
+        ))}
       {o.hasPaymentAttachment && perms.has('payments.verify') && (
         <a href={`/api/merchant/orders/${o.id}/attachment`} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm text-blue-700 underline" onClick={(e) => e.stopPropagation()}>
           📎 صورة التحويل

@@ -16,6 +16,7 @@ export const POST = route(async (req, _ctx, meta) => {
   const auth = await requirePermission('store.status', body.restaurantId);
   const before = await getRestaurant(db(), body.restaurantId);
   if (!before) throw new AppError('NOT_FOUND', 'Restaurant not found');
+  if (!before.isActive) throw new AppError('FORBIDDEN', 'الخدمة موقوفة من إدارة المنصة — مينفعش تفتحوا الطلبات دلوقتي');
   const [updated] = await db()
     .update(restaurants)
     .set({ orderingStatus: body.status, updatedAt: new Date() })

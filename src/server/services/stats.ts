@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db';
-import { orders, restaurants, settlements } from '../db/schema';
+import { orders, restaurants, settlements, users } from '../db/schema';
 import { ACTIVE_STATUSES, type OrderStatus } from '../../lib/domain/order-machine';
 
 const money = (col: unknown) => sql<number>`coalesce(sum(${col}), 0)::float8`;
@@ -129,4 +129,22 @@ export async function salesBySource(d: Db, from: Date, to: Date, restaurantId?: 
     .groupBy(sql`1`)
     .orderBy(desc(sql`2`));
   return rows.map((r) => ({ source: r.source, orders: Number(r.orders), completed: Number(r.completed), sales: Number(r.sales) }));
+}
+
+/** Per-courier hand-over summary for a day: who delivered what, and how much cash they should hand in. */
+export async function courierSummary(d: Db, restaurantId: string, from: Date, to: Date) {
+  const rows = await d
+    .select({
+      userId: orders.assignedToUserId,
+      name: users.name,
+      onTheWay: sql<number>`count(*) filter (where ${orders.status} in ('OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE'))::int`,
+      delivered: sql<number>`count(*) filter (where ${orders.status} = 'COMPLETED')::int`,
+      cashCollected: sql<number>`coalesce(sum(${orders.total}) filter (where ${orders.status} = 'COMPLETED' and ${orders.paymentMethod} = 'CASH'), 0)::float8`,
+      cashPending: sql<number>`coalesce(sum(${orders.total}) filter (where ${orders.status} in ('OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE') and ${orders.paymentMethod} = 'CASH'), 0)::float8`,
+    })
+    .from(orders)
+    .leftJoin(users, eq(users.id, orders.assignedToUserId))
+    .where(and(eq(orders.restaurantId, restaurantId), gte(orders.createdAt, from), lt(orders.createdAt, to), sql`${orders.assignedToUserId} is not null`))
+    .groupBy(orders.assignedToUserId, users.name);
+  return rows.map((r) => ({ userId: r.userId!, name: r.name ?? '—', onTheWay: Number(r.onTheWay), delivered: Number(r.delivered), cashCollected: Number(r.cashCollected), cashPending: Number(r.cashPending) }));
 }

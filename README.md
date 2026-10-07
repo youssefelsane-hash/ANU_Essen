@@ -24,6 +24,15 @@ Platform:  Sales · commission ledger · settlements · queue engine · menus ·
 
 ---
 
+
+## Operations quick reference
+
+- **Suspend a restaurant:** Admin → Restaurant → Settings → "Suspend service" (with a reason). No new orders; customers and QR codes see a clear message; in-progress orders can be finished. "Resume service" undoes it.
+- **Block a person:** Admin → Team members → Block (or the owner: Staff → Block, for their own staff). Signs them out everywhere immediately.
+- **Returning customers:** the phone remembers name, phone, payment method and pickup point; "Order it again" refills the cart and opens a pre-filled checkout (2 taps).
+- **Delivery:** delivery accounts get a two-column screen (ready for pickup / on the way), "pick up all ready" in one tap, cash-to-collect on every card, and a per-courier cash hand-in table on the owner's dashboard.
+- **More pickup points:** Admin → Restaurant → Settings → Delivery points (extra minutes and fee per point; ETA adjusts automatically).
+
 ## 1. Architecture (and why)
 
 **One Next.js app, deployed as one Vercel project, plus one PostgreSQL database.** That's the whole infrastructure.
