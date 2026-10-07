@@ -1,6 +1,7 @@
 import { getLocale } from '@/lib/i18n/server';
 import { text, localizedName } from '@/lib/i18n';
 import { asc, desc, eq } from 'drizzle-orm';
+import { normalizeAppUrl } from '@/server/env';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 import { db } from '@/server/db';
@@ -38,7 +39,7 @@ export default async function MarketingPage({ params }: { params: Promise<{ id: 
       <div className="space-y-6">
         <section className="card">
           <h2 className="mb-3 font-bold">{t("رمز الطلب والملصق", "QR code for posters")}</h2>
-          <QrGenerator restaurant={r} baseUrl={process.env.APP_URL ?? null} />
+          <QrGenerator restaurant={r} baseUrl={normalizeAppUrl(process.env.APP_URL) ?? null} />
         </section>
 
         <section className="card">

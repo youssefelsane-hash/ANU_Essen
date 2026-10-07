@@ -1,3 +1,4 @@
+import { normalizeAppUrl } from '@/server/env';
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { getLocale, getLanguageScope } from '@/lib/i18n/server';
@@ -5,7 +6,7 @@ import { direction } from '@/lib/i18n';
 import { LanguageProvider } from '@/components/language-provider';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.APP_URL || 'http://localhost:3000'),
+  metadataBase: new URL(normalizeAppUrl(process.env.APP_URL) || 'http://localhost:3000'),
   title: { default: 'اطلب', template: '%s' },
   description: 'اختار أكلك، اعرف وقت الاستلام، وتابع طلبك خطوة بخطوة.',
 };

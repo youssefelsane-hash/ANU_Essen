@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import * as schema from './schema';
 import { env } from '../env';
+import { normalizeDatabaseUrl } from './url';
 
 export { schema };
 // Accepts both the root database and a transaction handle (PgTransaction extends PgDatabase).
@@ -15,7 +16,7 @@ export function db(): Db {
   if (!g.__campusDb) {
     const e = env();
     // prepare:false keeps us compatible with transaction-mode poolers (Supabase/Neon pgbouncer).
-    const sql = postgres(e.DATABASE_URL, { max: e.DB_POOL_MAX, prepare: false, idle_timeout: 20, connect_timeout: 10 });
+    const sql = postgres(normalizeDatabaseUrl(e.DATABASE_URL), { max: e.DB_POOL_MAX, prepare: false, idle_timeout: 20, connect_timeout: 10 });
     g.__campusSql = sql;
     g.__campusDb = drizzle(sql, { schema }) as unknown as Db;
   }
