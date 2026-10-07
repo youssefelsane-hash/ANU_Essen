@@ -5,7 +5,7 @@ import { useLanguage } from '@/components/language-provider';
 import { LanguageSwitcher } from '@/components/language-switcher';
 import { localizedName } from '@/lib/i18n';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Banknote, Check, Clock3, CreditCard, LoaderCircle, MapPin, Minus, Pencil, Plus, ShieldCheck, ShoppingBag, Tag, Trash2, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Banknote, Check, Clock3, CreditCard, LoaderCircle, MapPin, Minus, Pencil, Plus, ShieldCheck, ShoppingBag, Store, Tag, Trash2, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { estimateLine, useCart } from '@/client/cart';
 import { fingerprint, uuid } from '@/client/ids';
@@ -268,9 +268,9 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
           </section>
 
           <section className="checkout-card">
-            <div className="checkout-card-heading"><span className="checkout-section-number">03</span><div><h2>{t("هنقابلك فين؟", "Where shall we meet?")}</h2><p>{t("اختار نقطة الاستلام المناسبة ليك.", "Choose a convenient pickup point.")}</p></div></div>
+            <div className="checkout-card-heading"><span className="checkout-section-number">03</span><div><h2>{t("تستلم منين؟", "How would you like to get it?")}</h2><p>{t("نوصّلهولك لنقطة الاستلام، أو تستلمه بنفسك من المطعم.", "We bring it to a pickup point, or you collect it at the restaurant.")}</p></div></div>
             <div className="checkout-choice-list">
-              {menu.deliveryPoints.length ? menu.deliveryPoints.map((point) => <label key={point.id} className={'customer-choice ' + (pointId === point.id ? 'is-selected' : '')}><input type="radio" name="delivery-point" checked={pointId === point.id} disabled={submitting} onChange={() => setPointId(point.id)} /><MapPin className="delivery-choice-icon" size={19} /><span>{localizedName(locale, point.nameAr, point.nameEn)}{point.isDefault && <small>{t("نقطة الاستلام الرئيسية", "Main pickup point")}</small>}</span><strong>{point.deliveryFee > 0 ? formatMoney(point.deliveryFee, locale) : t("بدون رسوم", "No fee")}</strong></label>) :
+              {menu.deliveryPoints.length ? menu.deliveryPoints.map((point) => <label key={point.id} className={'customer-choice ' + (pointId === point.id ? 'is-selected' : '')}><input type="radio" name="delivery-point" checked={pointId === point.id} disabled={submitting} onChange={() => setPointId(point.id)} />{point.kind === 'PICKUP' ? <Store className="delivery-choice-icon" size={19} /> : <MapPin className="delivery-choice-icon" size={19} />}<span>{localizedName(locale, point.nameAr, point.nameEn)}{point.kind === 'PICKUP' ? <small className="pickup-hint">{t("بتستلمه بنفسك أول ما يجهز — من غير توصيل", "Collect it yourself as soon as it's ready")}</small> : point.isDefault && <small>{t("نقطة الاستلام الرئيسية", "Main pickup point")}</small>}</span><strong>{point.deliveryFee > 0 ? formatMoney(point.deliveryFee, locale) : t("بدون رسوم", "No fee")}</strong></label>) :
                 <p className="checkout-line-note">{t("نقطة الاستلام بتتحدد مع المطعم.", "Arrange pickup with the restaurant.")}</p>}
             </div>
           </section>
@@ -291,7 +291,7 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
           <section className="checkout-card">
             <h2 className="checkout-summary-heading"><ShoppingBag size={20} />{t("ملخص طلبك", "Your order summary")}</h2>
             {quote ? <>
-              <div className="checkout-eta"><Clock3 size={25} strokeWidth={1.5} /><div><span>{t("وقت الوصول المتوقع", "Estimated arrival")}</span><strong>{t("حوالي ", "About ")}{quote.etaMinutes}{t(" دقيقة", " minutes")}</strong><small>{t("تقدير بيتحدث حسب ضغط المطبخ؛ التوقيت يتأكد بعد قبول الطلب.", "This estimate changes with kitchen demand. Timing is confirmed when your order is accepted.")}</small></div></div>
+              <div className="checkout-eta"><Clock3 size={25} strokeWidth={1.5} /><div><span>{menu.deliveryPoints.find((p) => p.id === pointId)?.kind === 'PICKUP' ? t("جاهز للاستلام من المطعم خلال", "Ready to collect in") : t("وقت الوصول المتوقع", "Estimated arrival")}</span><strong>{t("حوالي ", "About ")}{quote.etaMinutes}{t(" دقيقة", " minutes")}</strong><small>{t("تقدير بيتحدث حسب ضغط المطبخ؛ التوقيت يتأكد بعد قبول الطلب.", "This estimate changes with kitchen demand. Timing is confirmed when your order is accepted.")}</small></div></div>
               <div className="checkout-money-rows"><MoneyRow label={t("قيمة الأصناف", "Items subtotal")} value={formatMoney(quote.subtotal, locale)} />{quote.discount > 0 && <MoneyRow label={t("خصم طلبك", "Your discount")} value={'− ' + formatMoney(quote.discount, locale)} discount />}<MoneyRow label={t("رسوم التوصيل", "Delivery fee")} value={quote.deliveryFee > 0 ? formatMoney(quote.deliveryFee, locale) : t("مجانًا", "Free")} /></div>
               <div className="checkout-grand-total"><span>{t("الإجمالي", "Total")}</span><strong>{formatMoney(quote.total, locale)}</strong></div>
               {quote.minOrderShortfall > 0 && <p className="checkout-submit-hint">{t("الحد الأدنى ", "Minimum order ")}{formatMoney(quote.minOrderAmount, locale)}{t(". ضيف ", ". Add ")}{formatMoney(quote.minOrderShortfall, locale)}{t(" عشان تكمل.", " to continue.")}</p>}

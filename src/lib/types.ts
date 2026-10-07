@@ -1,5 +1,5 @@
 /** DTOs shared by the server and the browser apps. Dates travel as epoch milliseconds. */
-import type { OrderAction, OrderStatus, PaymentMethod, PaymentStatus } from './domain/order-machine';
+import type { Fulfillment, OrderAction, OrderChannel, OrderStatus, PaymentMethod, PaymentStatus } from './domain/order-machine';
 import type { LoadLevel } from './domain/queue';
 import type { EffectiveStatus, StatusReason } from './domain/store-status';
 
@@ -42,6 +42,8 @@ export interface OrderSnapshot {
   customerNote: string | null;
   deliveryPointName: string;
   deliveryPointNameEn?: string | null;
+  fulfillment: Fulfillment;
+  channel: OrderChannel;
   items: SnapshotItem[];
   subtotal: number;
   discountTotal: number;
@@ -119,6 +121,7 @@ export interface TrackingView {
     customerName: string;
     deliveryPointName: string;
     deliveryPointNameEn?: string | null;
+    fulfillment: Fulfillment;
     items: SnapshotItem[];
     subtotal: number;
     discountTotal: number;
@@ -178,7 +181,7 @@ export interface PublicMenu {
   addonGroups: { id: string; nameAr: string; nameEn?: string; minSelect: number; maxSelect: number; addons: { id: string; nameAr: string; nameEn?: string; price: number; isAvailable: boolean }[] }[];
   banners: { id: string; titleAr: string; titleEn?: string | null; subtitleAr: string | null; subtitleEn?: string | null; imageUrl: string | null; bgColor: string; textColor: string }[];
   paymentMethods: { method: PaymentMethod }[];
-  deliveryPoints: { id: string; nameAr: string; nameEn: string; isDefault: boolean; deliveryFee: number }[];
+  deliveryPoints: { id: string; nameAr: string; nameEn: string; isDefault: boolean; deliveryFee: number; kind: Fulfillment }[];
 }
 
 export interface QuoteResponse {

@@ -58,3 +58,15 @@ export const syncQuerySchema = z.object({
   deviceId: z.uuid(),
   cursor: z.coerce.number().int().min(0).default(0),
 });
+
+/** Walk-in order entered by staff at the register. Name/phone are optional for someone standing at the counter. */
+export const counterOrderSchema = z.object({
+  restaurantId: z.uuid(),
+  deviceId: z.uuid().nullish(),
+  items: z.array(cartLineSchema).min(1).max(30),
+  customerName: z.string().trim().max(60).nullish(),
+  customerPhone: z.string().trim().max(20).nullish(),
+  note: z.string().trim().max(300).nullish(),
+  paymentMethod: z.enum(PAYMENT_METHODS),
+  deliveryPointId: z.uuid().nullish(),
+});

@@ -101,6 +101,8 @@ export async function bootstrapRestaurant(
       { restaurantId: r.id, method: 'INSTAPAY', isEnabled: false, config: {}, sortOrder: 0 },
       { restaurantId: r.id, method: 'CASH', isEnabled: true, config: {}, sortOrder: 1 },
     ]);
+    // Every restaurant can always serve walk-ins; delivery points (e.g. a university gate) are added per restaurant.
+    await tx.insert(deliveryPoints).values({ restaurantId: r.id, nameAr: 'استلام من المطعم', nameEn: 'Pickup at the restaurant', kind: 'PICKUP', isDefault: false, sortOrder: 100 });
     return r;
   });
 }

@@ -60,3 +60,19 @@ export function slugify(input: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
 }
+
+/**
+ * Only same-site paths are allowed as post-login destinations. Browsers treat "/\evil.com" like
+ * "//evil.com", so a prefix check is not enough: resolve it and require the same origin.
+ */
+export function safeInternalPath(next: string | null | undefined): string | null {
+  if (!next || next.length > 512 || !next.startsWith('/') || /[\\\u0000-\u001f]/.test(next)) return null;
+  try {
+    const base = 'http://internal.invalid';
+    const url = new URL(next, base);
+    if (url.origin !== base) return null;
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return null;
+  }
+}

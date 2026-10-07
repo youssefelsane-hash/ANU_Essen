@@ -93,7 +93,7 @@ describe('ordering reliability regressions', () => {
   });
 
   it('quotes the actual cart load and selected pickup travel time, then saves a provisional ETA', async () => {
-    const [point] = await d.select().from(s.deliveryPoints).where(eq(s.deliveryPoints.restaurantId, demo.restaurantId));
+    const [point] = await d.select().from(s.deliveryPoints).where(and(eq(s.deliveryPoints.restaurantId, demo.restaurantId), eq(s.deliveryPoints.kind, 'DELIVERY')));
     const cfg = await getQueueConfig(d, demo.restaurantId);
     const { load } = await getActiveLoad(d, demo.restaurantId);
     await d.update(s.deliveryPoints).set({ extraMinutes: 6 }).where(eq(s.deliveryPoints.id, point.id));

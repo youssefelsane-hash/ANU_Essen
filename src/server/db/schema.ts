@@ -22,7 +22,7 @@ import {
   unique,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES } from '../../lib/domain/order-machine';
+import { FULFILLMENTS, ORDER_CHANNELS, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES } from '../../lib/domain/order-machine';
 import { PROMOTION_TYPES } from '../../lib/domain/pricing';
 import type { WeeklyHours } from '../../lib/domain/hours';
 import type { QueueConfig } from '../../lib/domain/queue';
@@ -42,6 +42,8 @@ export const orderingStatusEnum = pgEnum('ordering_status', ['OPEN', 'PAUSED', '
 export const roleScopeEnum = pgEnum('role_scope', ['PLATFORM', 'STORE']);
 export const promotionTypeEnum = pgEnum('promotion_type', PROMOTION_TYPES);
 export const actorTypeEnum = pgEnum('actor_type', ['CUSTOMER', 'USER', 'SYSTEM']);
+export const fulfillmentEnum = pgEnum('fulfillment', FULFILLMENTS);
+export const orderChannelEnum = pgEnum('order_channel', ORDER_CHANNELS);
 
 // ---------------------------------------------------------------- identity & RBAC
 
@@ -125,6 +127,8 @@ export const restaurants = pgTable('restaurants', {
   openingHours: jsonb('opening_hours').$type<WeeklyHours | null>(),
   minOrderAmount: integer('min_order_amount').notNull().default(0),
   commissionBps: integer('commission_bps').notNull().default(500),
+  /** Charge platform commission on walk-in orders entered at the counter too. */
+  counterCommissionEnabled: boolean('counter_commission_enabled').notNull().default(true),
   requirePhone: boolean('require_phone').notNull().default(true),
   unpaidTimeoutMinutes: integer('unpaid_timeout_minutes').notNull().default(20),
   /** false = service suspended by the platform (no new orders; active orders can still be finished). */
@@ -175,6 +179,8 @@ export const deliveryPoints = pgTable(
     nameAr: text('name_ar').notNull(),
     nameEn: text('name_en').notNull(),
     description: text('description'),
+    /** DELIVERY = we bring it to this point; PICKUP = the customer collects it at the restaurant. */
+    kind: fulfillmentEnum('kind').notNull().default('DELIVERY'),
     deliveryFee: integer('delivery_fee').notNull().default(0),
     extraMinutes: integer('extra_minutes').notNull().default(0),
     isDefault: boolean('is_default').notNull().default(false),
@@ -424,6 +430,10 @@ export const orders = pgTable(
     paymentStatus: paymentStatusEnum('payment_status').notNull(),
     deliveryPointId: uuid('delivery_point_id').references(() => deliveryPoints.id, { onDelete: 'set null' }),
     deliveryPointName: text('delivery_point_name').notNull(),
+    fulfillment: fulfillmentEnum('fulfillment').notNull().default('DELIVERY'),
+    channel: orderChannelEnum('channel').notNull().default('ONLINE'),
+    /** Staff member who entered a counter order. */
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
     deliveryPointNameEn: text('delivery_point_name_en'),
     subtotal: integer('subtotal').notNull(),
     discountTotal: integer('discount_total').notNull().default(0),

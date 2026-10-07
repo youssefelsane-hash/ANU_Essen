@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { MerchantEngine, type EngineState } from '@/client/merchant/engine';
 import { getPaperWidth, setPaperWidth, type PaperWidth } from '@/client/merchant/printing';
 import { formatMoney, formatTime } from '@/lib/domain/misc';
-import { isTerminal, primaryActionFor, TRANSITIONS, type OrderAction, type OrderStatus } from '@/lib/domain/order-machine';
+import { isTerminal, primaryActionFor, transitionFor, type OrderAction, type OrderStatus } from '@/lib/domain/order-machine';
 import { PAYMENT_STATUS_TONE } from '@/lib/labels';
 import { useLanguage } from '@/components/language-provider';
 import { labels, localizedName, localizeMessage, text, type Locale } from '@/lib/i18n';
@@ -204,6 +204,7 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
     <div className="flex min-h-[calc(100dvh-120px)] flex-col">
       <TopBar
         state={state}
+        canCreateOrders={perms.has('orders.create')}
         restaurantId={restaurant.id}
         canChangeStatus={perms.has('store.status')}
         onStore={(s) => engine?.setStore(s)}
@@ -271,16 +272,16 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
                   {t(c.title, c.titleEn)}
                   <span className="badge bg-white text-gray-800">{shown.length}</span>
                 </h2>
-                {c.key === 'ready' && perms.has('orders.delivery') && shown.length > 1 && (
+                {c.key === 'ready' && perms.has('orders.delivery') && shown.filter((o) => o.fulfillment !== 'PICKUP').length > 1 && (
                   <div className="px-2 pb-2">
                     <button
                       className="btn btn-primary w-full"
                       onClick={async () => {
-                        // Everything goes to the same pickup run; each order is still its own synced action.
-                        for (const o of shown) await act(o, 'OUT_FOR_DELIVERY');
+                        // One delivery run; pickup orders stay at the counter. Each order is still its own synced action.
+                        for (const o of shown) if (o.fulfillment !== 'PICKUP') await act(o, 'OUT_FOR_DELIVERY');
                       }}
                     >
-                      🛵 {t(`استلام كل الجاهز (${shown.length})`, `Collect all ready orders (${shown.length})`)}
+                      🛵 {t(`استلام كل الجاهز للتوصيل (${shown.filter((o) => o.fulfillment !== 'PICKUP').length})`, `Collect all ready deliveries (${shown.filter((o) => o.fulfillment !== 'PICKUP').length})`)}
                     </button>
                   </div>
                 )}
@@ -370,6 +371,7 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
 
 function TopBar({
   state,
+  canCreateOrders,
   restaurantId,
   canChangeStatus,
   onStore,
@@ -380,6 +382,7 @@ function TopBar({
   onSync,
 }: {
   state: EngineState;
+  canCreateOrders: boolean;
   restaurantId: string;
   canChangeStatus: boolean;
   onStore: (s: StoreLive) => void;
@@ -436,6 +439,7 @@ function TopBar({
             </div>
           )}
         </div>
+        {canCreateOrders && <a href="/merchant/new-order" className="btn btn-dark btn-sm">➕ {t('طلب جديد من الكاشير', 'New counter order')}</a>}
         {!soundEnabled ? <button className="btn btn-primary btn-sm" onClick={enableSound}>🔔 {t('تفعيل صوت الطلبات', 'Enable order sound')}</button> : <span className="badge bg-green-100 text-green-800">🔔 {t('الصوت مفعّل', 'Sound enabled')}</span>}
       </div>
       <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -493,8 +497,10 @@ function OrderCard({
 }) {
   const { locale, t } = useLanguage();
   const copy = labels(locale);
-  const primary = primaryActionFor(o.status);
-  const canPrimary = !!primary && perms.has(TRANSITIONS[primary].permission);
+  const pickup = o.fulfillment === 'PICKUP';
+  const primary = primaryActionFor(o.status, o.fulfillment);
+  const primaryDef = primary ? transitionFor(primary, o.fulfillment) : null;
+  const canPrimary = !!primaryDef && perms.has(primaryDef.permission);
   const kitchenPhase = o.status === 'CONFIRMED' || o.status === 'PREPARING';
   const readyIn = o.estimatedReadyAt ? o.estimatedReadyAt - now : null;
   const arriveIn = o.estimatedArrivalAt ? o.estimatedArrivalAt - now : null;
@@ -513,6 +519,10 @@ function OrderCard({
         </div>
         <div className="flex flex-col items-end gap-1">
           {highlighted && <span className="badge bg-amber-400 text-black">{t('جديد!', 'New!')}</span>}
+          <span className={`badge ${pickup ? 'bg-orange-100 text-orange-900' : 'bg-sky-100 text-sky-900'}`}>
+            {pickup ? t('🏪 استلام من المحل', '🏪 Pickup at counter') : t('🛵 توصيل', '🛵 Delivery')}
+            {o.channel === 'COUNTER' ? t(' · كاشير', ' · Counter') : ''}
+          </span>
           <span className={`badge ${PAYMENT_STATUS_TONE[o.paymentStatus]}`}>
             {copy.paymentMethod[o.paymentMethod]} • {copy.paymentStatus[o.paymentStatus]}
           </span>
@@ -589,7 +599,7 @@ function OrderCard({
             onAction(o, primary);
           }}
         >
-          {copy.action[primary]}
+          {pickup && primary === 'COMPLETE' ? t('سلّم للعميل ✓', 'Handed to customer ✓') : copy.action[primary]}
           {primary === 'VERIFY_PAYMENT' ? ` (${formatMoney(o.total, locale)})` : ''}
         </button>
       )}

@@ -47,6 +47,14 @@ export type OrderAction = (typeof ORDER_ACTIONS)[number];
 
 export type ActorType = 'CUSTOMER' | 'USER' | 'SYSTEM';
 
+/** How the customer gets the food: delivered to a pickup point (default) or collected at the restaurant counter. */
+export const FULFILLMENTS = ['DELIVERY', 'PICKUP'] as const;
+export type Fulfillment = (typeof FULFILLMENTS)[number];
+
+/** Where the order was placed: the customer's phone (QR) or by staff at the counter. */
+export const ORDER_CHANNELS = ['ONLINE', 'COUNTER'] as const;
+export type OrderChannel = (typeof ORDER_CHANNELS)[number];
+
 interface TransitionDef {
   from: readonly OrderStatus[];
   to: OrderStatus;
@@ -81,6 +89,18 @@ export const TRANSITIONS: Record<OrderAction, TransitionDef> = {
   },
 };
 
+/** Pickup orders skip the delivery leg: once ready, the counter hands them over directly. */
+const PICKUP_OVERRIDES: Partial<Record<OrderAction, TransitionDef | null>> = {
+  OUT_FOR_DELIVERY: null,
+  MARK_ARRIVED: null,
+  COMPLETE: { from: ['READY'], to: 'COMPLETED', permission: 'orders.delivery' },
+};
+
+export function transitionFor(action: OrderAction, fulfillment: Fulfillment = 'DELIVERY'): TransitionDef | null {
+  if (fulfillment === 'PICKUP' && action in PICKUP_OVERRIDES) return PICKUP_OVERRIDES[action] ?? null;
+  return TRANSITIONS[action] ?? null;
+}
+
 export const TERMINAL_STATUSES: readonly OrderStatus[] = ['COMPLETED', 'CANCELLED'];
 /** Orders that count toward the kitchen load. */
 export const KITCHEN_LOAD_STATUSES: readonly OrderStatus[] = ['CONFIRMED', 'PREPARING'];
@@ -92,8 +112,8 @@ export function isTerminal(status: OrderStatus): boolean {
 }
 
 /** Returns the next status for an action, or null if the transition is not allowed. */
-export function nextStatus(current: OrderStatus, action: OrderAction): OrderStatus | null {
-  const def = TRANSITIONS[action];
+export function nextStatus(current: OrderStatus, action: OrderAction, fulfillment: Fulfillment = 'DELIVERY'): OrderStatus | null {
+  const def = transitionFor(action, fulfillment);
   if (!def) return null;
   return def.from.includes(current) ? def.to : null;
 }
@@ -103,8 +123,10 @@ export function actorMayPerform(
   action: OrderAction,
   current: OrderStatus,
   hasPermission: (permission: string) => boolean,
+  fulfillment: Fulfillment = 'DELIVERY',
 ): boolean {
-  const def = TRANSITIONS[action];
+  const def = transitionFor(action, fulfillment);
+  if (!def) return false;
   if (actor === 'SYSTEM') return def.systemAllowed === true;
   if (actor === 'CUSTOMER') return def.customerFrom?.includes(current) ?? false;
   return hasPermission(def.permission);
@@ -138,7 +160,7 @@ export function initialStatusFor(method: PaymentMethod): { status: OrderStatus; 
 }
 
 /** The main "next step" button for staff screens, in priority order. */
-export function primaryActionFor(status: OrderStatus): OrderAction | null {
+export function primaryActionFor(status: OrderStatus, fulfillment: Fulfillment = 'DELIVERY'): OrderAction | null {
   switch (status) {
     case 'CREATED':
       return 'ACCEPT';
@@ -150,7 +172,7 @@ export function primaryActionFor(status: OrderStatus): OrderAction | null {
     case 'PREPARING':
       return 'MARK_READY';
     case 'READY':
-      return 'OUT_FOR_DELIVERY';
+      return fulfillment === 'PICKUP' ? 'COMPLETE' : 'OUT_FOR_DELIVERY';
     case 'OUT_FOR_DELIVERY':
       return 'MARK_ARRIVED';
     case 'ARRIVED_AT_GATE':

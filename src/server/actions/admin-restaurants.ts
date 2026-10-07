@@ -120,6 +120,7 @@ export async function updateRestaurantAction(_prev: ActionState, fd: FormData): 
       minOrderAmount: money(fd, 'minOrder')!,
       commissionBps: Math.round(commissionPercent * 100),
       requirePhone: bool(fd, 'requirePhone'),
+      counterCommissionEnabled: bool(fd, 'counterCommissionEnabled'),
       unpaidTimeoutMinutes: z.number().int().min(0).max(1440).parse(int(fd, 'unpaidTimeoutMinutes')),
       openingHours,
     };
@@ -207,12 +208,15 @@ export async function saveDeliveryPointAction(_prev: ActionState, fd: FormData):
     const restaurantId = uuid(str(fd, 'restaurantId'));
     const auth = await requirePermission('platform.restaurants');
     const id = str(fd, 'id');
+    const kind = z.enum(['DELIVERY', 'PICKUP']).parse(str(fd, 'kind') || 'DELIVERY');
     const values = {
       restaurantId,
+      kind,
       nameAr: z.string().min(2).parse(str(fd, 'nameAr')),
       nameEn: z.string().min(2).parse(str(fd, 'nameEn')),
-      deliveryFee: money(fd, 'deliveryFee')!,
-      extraMinutes: z.number().int().min(0).max(120).parse(int(fd, 'extraMinutes')),
+      // Collecting at the restaurant has no delivery leg: no fee, no travel time.
+      deliveryFee: kind === 'PICKUP' ? 0 : money(fd, 'deliveryFee')!,
+      extraMinutes: kind === 'PICKUP' ? 0 : z.number().int().min(0).max(120).parse(int(fd, 'extraMinutes')),
       isDefault: bool(fd, 'isDefault'),
       isActive: bool(fd, 'isActive'),
       sortOrder: int(fd, 'sortOrder'),

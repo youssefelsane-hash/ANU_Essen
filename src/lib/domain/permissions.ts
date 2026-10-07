@@ -16,6 +16,7 @@ export const PERMISSIONS = {
   // Store scoped.
   'orders.view': { scope: 'STORE', description: 'See all orders of the restaurant' },
   'orders.accept': { scope: 'STORE', description: 'Accept cash orders' },
+  'orders.create': { scope: 'STORE', description: 'Create orders at the counter (walk-in customers)' },
   'orders.kitchen': { scope: 'STORE', description: 'Start preparing / mark ready' },
   'orders.delivery': { scope: 'STORE', description: 'Out for delivery / arrived / completed' },
   'orders.cancel': { scope: 'STORE', description: 'Cancel orders' },
@@ -64,6 +65,7 @@ export const SYSTEM_ROLES: readonly SystemRoleDef[] = [
     permissions: [
       'orders.view',
       'orders.accept',
+      'orders.create',
       'orders.kitchen',
       'orders.delivery',
       'orders.cancel',
@@ -79,7 +81,7 @@ export const SYSTEM_ROLES: readonly SystemRoleDef[] = [
     name: 'Cashier / Order Operator',
     scope: 'STORE',
     description: 'Orders, payment verification and receipts.',
-    permissions: ['orders.view', 'orders.accept', 'orders.delivery', 'payments.verify', 'receipts.print'],
+    permissions: ['orders.view', 'orders.accept', 'orders.create', 'orders.delivery', 'payments.verify', 'receipts.print'],
   },
   {
     key: 'KITCHEN_STAFF',

@@ -31,7 +31,7 @@ function order(overrides: Partial<OrderSnapshot> = {}): OrderSnapshot {
   return {
     id: 'order-1', restaurantId: 'store-1', orderNumber: 'A100', status: 'CREATED', paymentMethod: 'CASH', paymentStatus: 'CASH',
     paymentReference: null, paymentRejectedReason: null, hasPaymentAttachment: false, customerName: 'Sam', customerPhone: null, customerNote: null,
-    deliveryPointName: 'بوابة الجامعة', deliveryPointNameEn: 'University Gate',
+    deliveryPointName: 'بوابة الجامعة', deliveryPointNameEn: 'University Gate', fulfillment: 'DELIVERY', channel: 'ONLINE',
     items: [{ id: 'item-1', nameAr: 'شاورما', nameEn: 'Shawarma', variantNameAr: 'كبير', variantNameEn: 'Large', quantity: 1, unitPrice: 8500, addonsPerUnit: 500, lineTotal: 9000, addons: [{ nameAr: 'جبنة', nameEn: 'Cheese', price: 500 }], note: null }],
     subtotal: 9000, discountTotal: 0, deliveryFee: 0, total: 9000, currency: 'EGP', promoCode: null, loadUnits: 1,
     estimatedReadyAt: null, estimatedArrivalAt: null, createdAt: Date.now(), confirmedAt: null, preparingAt: null, readyAt: null,
