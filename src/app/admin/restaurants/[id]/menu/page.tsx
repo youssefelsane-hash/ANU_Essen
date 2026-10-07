@@ -6,7 +6,8 @@ import { db } from '@/server/db';
 import { addonGroups, addons, categories, products, productVariants } from '@/server/db/schema';
 import { adminPage } from '@/server/admin-guard';
 import { getRestaurant } from '@/server/services/store';
-import { saveAddonGroupAction, saveCategoryAction } from '@/server/actions/admin-restaurants';
+import { saveAddonGroupAction, saveCategoryAction, setProductActiveAction } from '@/server/actions/admin-restaurants';
+import { setProductAvailability } from '@/server/actions/merchant';
 import { ActionForm, SubmitButton } from '@/components/forms';
 import { RowsEditor } from '@/components/admin/editors';
 import { Forbidden, PageTitle, RestaurantTabs } from '@/components/admin/ui';
@@ -48,7 +49,18 @@ export default async function AdminMenuPage({ params }: { params: Promise<{ id: 
                     <td>{cats.find((c) => c.id === p.categoryId)?.nameEn}</td>
                     <td>{vs.length ? vs.map((v) => `${v.nameEn} ${formatMoney(v.price, 'en')}`).join(' · ') : formatMoney(p.basePrice, 'en')}</td>
                     <td>{p.prepLoadUnits}</td>
-                    <td>{!p.isActive ? 'Archived' : p.isAvailable ? 'Available' : 'Unavailable'}</td>
+                    <td>
+                      <div className="flex flex-wrap gap-1">
+                        {p.isActive && (
+                          <form action={setProductAvailability.bind(null, p.id, !p.isAvailable)}>
+                            <button className={`btn btn-sm ${p.isAvailable ? 'btn-success' : 'btn-secondary'}`} title="Toggle availability (customers see it instantly)">{p.isAvailable ? 'Available' : 'Unavailable'}</button>
+                          </form>
+                        )}
+                        <form action={setProductActiveAction.bind(null, p.id, !p.isActive)}>
+                          <button className="btn btn-ghost btn-sm">{p.isActive ? 'Archive' : 'Restore'}</button>
+                        </form>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}

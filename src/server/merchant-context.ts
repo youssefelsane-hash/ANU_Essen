@@ -14,6 +14,8 @@ export interface MerchantStoreRef {
   nameAr: string;
   nameEn: string;
   timezone: string;
+  isActive: boolean;
+  suspendedReason: string | null;
 }
 
 /** Store-level permissions the user holds in a restaurant (platform admins hold all of them everywhere). */
@@ -25,7 +27,7 @@ export function storePermissionsFor(auth: AuthContext, restaurantId: string): st
 
 export async function merchantContext(path: string) {
   const auth = await pageAuth(path);
-  const cols = { id: restaurants.id, slug: restaurants.slug, nameAr: restaurants.nameAr, nameEn: restaurants.nameEn, timezone: restaurants.timezone };
+  const cols = { id: restaurants.id, slug: restaurants.slug, nameAr: restaurants.nameAr, nameEn: restaurants.nameEn, timezone: restaurants.timezone, isActive: restaurants.isActive, suspendedReason: restaurants.suspendedReason };
   let list: MerchantStoreRef[];
   if (auth.platformPermissions.has('platform.restaurants')) {
     list = await db().select(cols).from(restaurants).orderBy(asc(restaurants.nameAr));

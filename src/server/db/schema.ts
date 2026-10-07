@@ -125,7 +125,10 @@ export const restaurants = pgTable('restaurants', {
   commissionBps: integer('commission_bps').notNull().default(500),
   requirePhone: boolean('require_phone').notNull().default(true),
   unpaidTimeoutMinutes: integer('unpaid_timeout_minutes').notNull().default(20),
+  /** false = service suspended by the platform (no new orders; active orders can still be finished). */
   isActive: boolean('is_active').notNull().default(true),
+  suspendedReason: text('suspended_reason'),
+  suspendedAt: ts('suspended_at'),
   version: integer('version').notNull().default(1),
   createdAt: createdAt(),
   updatedAt: updatedAt(),

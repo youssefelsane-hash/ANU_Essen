@@ -3,7 +3,8 @@ import { asc, eq } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { restaurants, roles, userRoles, users } from '@/server/db/schema';
 import { adminPage } from '@/server/admin-guard';
-import { createUserAction } from '@/server/actions/admin-platform';
+import { createUserAction, setUserActiveAction } from '@/server/actions/admin-platform';
+import { pageAuth } from '@/server/auth/session';
 import { ActionForm, SubmitButton } from '@/components/forms';
 import { Forbidden, PageTitle } from '@/components/admin/ui';
 
@@ -11,6 +12,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function UsersPage() {
   if (!(await adminPage('/admin/users', 'platform.users'))) return <Forbidden />;
+  const me = await pageAuth('/admin/users');
   const [list, assignments, roleList, restaurantList] = await Promise.all([
     db().select().from(users).orderBy(asc(users.name)),
     db()
@@ -26,14 +28,21 @@ export default async function UsersPage() {
       <PageTitle title="Users & staff" />
       <section className="card overflow-x-auto">
         <table className="table">
-          <thead><tr><th>Name</th><th>Email</th><th>Roles</th><th>Status</th></tr></thead>
+          <thead><tr><th>Name</th><th>Email (sign-in)</th><th>Roles</th><th>Status</th><th /></tr></thead>
           <tbody>
             {list.map((u) => (
               <tr key={u.id}>
                 <td><Link className="font-semibold text-blue-700" href={`/admin/users/${u.id}`}>{u.name}</Link></td>
                 <td>{u.email}</td>
                 <td className="text-xs">{assignments.filter((a) => a.userId === u.id).map((a) => `${a.role}${a.restaurant ? ` @ ${a.restaurant}` : ''}`).join(', ') || '—'}</td>
-                <td>{u.isActive ? 'Active' : <span className="text-red-600">Disabled</span>}</td>
+                <td>{u.isActive ? <span className="badge bg-emerald-50 text-emerald-700">Active</span> : <span className="badge bg-red-100 text-red-700">Blocked</span>}</td>
+                <td>
+                  {u.id !== me.user.id && (
+                    <form action={setUserActiveAction.bind(null, u.id, !u.isActive)}>
+                      <button className={`btn btn-sm ${u.isActive ? 'btn-danger' : 'btn-success'}`}>{u.isActive ? 'Block' : 'Unblock'}</button>
+                    </form>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

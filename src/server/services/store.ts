@@ -76,6 +76,7 @@ export async function getStoreLive(d: Db, r: RestaurantRow, now = new Date()): P
   };
 }
 
-export function closedMessage(status: string): string {
+export function closedMessage(status: string, reason?: string | null): string {
+  if (reason === 'INACTIVE') return 'الطلب أونلاين من المطعم ده متوقف مؤقتًا';
   return status === 'PAUSED' ? 'الطلبات متوقفة مؤقتًا بسبب ضغط الطلبات' : 'المحل مغلق حاليًا';
 }

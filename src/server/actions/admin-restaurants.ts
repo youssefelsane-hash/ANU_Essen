@@ -119,7 +119,6 @@ export async function updateRestaurantAction(_prev: ActionState, fd: FormData): 
       commissionBps: Math.round(commissionPercent * 100),
       requirePhone: bool(fd, 'requirePhone'),
       unpaidTimeoutMinutes: z.number().int().min(0).max(1440).parse(int(fd, 'unpaidTimeoutMinutes')),
-      isActive: bool(fd, 'isActive'),
       openingHours,
     };
     const changes = diff(before as unknown as Record<string, unknown>, patch);
@@ -143,6 +142,34 @@ export async function updateRestaurantAction(_prev: ActionState, fd: FormData): 
     revalidatePath('/');
     return 'Saved';
   });
+}
+
+/**
+ * Platform-level service suspension (e.g. unpaid commission, contract ended). Customers can't order,
+ * the merchant can't reopen it, and orders already in progress can still be finished and delivered.
+ */
+export async function suspendRestaurantAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  return runAction(async () => {
+    const id = uuid(str(fd, 'restaurantId'));
+    const auth = await requirePermission('platform.restaurants');
+    const before = await restaurantOrThrow(id);
+    const reason = z.string().trim().min(3, 'Write a short reason (shown to the restaurant)').max(200).parse(str(fd, 'reason'));
+    await db().update(restaurants).set({ isActive: false, suspendedReason: reason, suspendedAt: new Date(), updatedAt: new Date(), version: before.version + 1 }).where(eq(restaurants.id, id));
+    await audit({ actor: actor(auth), action: 'restaurant.suspended', entity: 'restaurant', entityId: id, restaurantId: id, before: { isActive: before.isActive }, after: { isActive: false, reason }, ...(await requestMeta()) });
+    revalidatePath('/admin/restaurants');
+    revalidatePath(`/admin/restaurants/${id}`);
+    return 'Service suspended — new orders are blocked';
+  });
+}
+
+export async function resumeRestaurantAction(restaurantId: string) {
+  const id = uuid(restaurantId);
+  const auth = await requirePermission('platform.restaurants');
+  const before = await restaurantOrThrow(id);
+  await db().update(restaurants).set({ isActive: true, suspendedReason: null, suspendedAt: null, updatedAt: new Date(), version: before.version + 1 }).where(eq(restaurants.id, id));
+  await audit({ actor: actor(auth), action: 'restaurant.resumed', entity: 'restaurant', entityId: id, restaurantId: id, before: { isActive: before.isActive, reason: before.suspendedReason }, after: { isActive: true }, ...(await requestMeta()) });
+  revalidatePath('/admin/restaurants');
+  revalidatePath(`/admin/restaurants/${id}`);
 }
 
 export async function updatePaymentMethodAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
@@ -477,4 +504,15 @@ export async function savePromotionAction(_prev: ActionState, fd: FormData): Pro
     revalidatePath(`/admin/restaurants/${restaurantId}/marketing`);
     return 'Promotion saved';
   });
+}
+
+/** Archive (hide from the menu, keep for order history) or restore a product. */
+export async function setProductActiveAction(productId: string, active: boolean) {
+  const pid = uuid(productId);
+  const [p] = await db().select().from(products).where(eq(products.id, pid));
+  if (!p) throw new AppError('NOT_FOUND', 'Product not found');
+  const auth = await requirePermission('menu.manage', p.restaurantId);
+  await db().update(products).set({ isActive: active, updatedAt: new Date(), version: p.version + 1 }).where(eq(products.id, pid));
+  await audit({ actor: actor(auth), action: active ? 'menu.product_restored' : 'menu.product_archived', entity: 'product', entityId: pid, restaurantId: p.restaurantId, before: { isActive: p.isActive }, after: { isActive: active } });
+  revalidatePath(`/admin/restaurants/${p.restaurantId}/menu`);
 }

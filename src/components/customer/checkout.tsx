@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Banknote, Check, Clock3, CreditCard, LoaderCircle, MapPin, Minus, Plus, ShieldCheck, ShoppingBag, Tag, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Banknote, Check, Clock3, CreditCard, LoaderCircle, MapPin, Minus, Pencil, Plus, ShieldCheck, ShoppingBag, Tag, Trash2, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { estimateLine, useCart } from '@/client/cart';
 import { fingerprint, uuid } from '@/client/ids';
-import { PROFILE_KEY, readJson, rememberOrder, writeJson } from '@/client/storage';
+import { PROFILE_KEY, prefsKey, readJson, rememberOrder, writeJson, type CheckoutPrefs } from '@/client/storage';
 import { formatMoney, normalizeEgyptianPhone } from '@/lib/domain/misc';
 import { brandTextColor } from '@/lib/domain/restaurant-brand';
 import type { PaymentMethod } from '@/lib/domain/order-machine';
@@ -24,6 +24,9 @@ export function Checkout({ menu }: { menu: PublicMenu }) {
   const [phone, setPhone] = useState('');
   const [note, setNote] = useState('');
   const [showNote, setShowNote] = useState(false);
+  /** Returning customer: name + phone come from this phone, shown as one compact line. */
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
   const [showPromo, setShowPromo] = useState(false);
   const [promoInput, setPromoInput] = useState('');
   const [promoCode, setPromoCode] = useState<string | null>(null);
@@ -45,6 +48,12 @@ export function Checkout({ menu }: { menu: PublicMenu }) {
     const profile = readJson<{ name?: string; phone?: string }>(PROFILE_KEY, {});
     if (profile.name) setName(profile.name);
     if (profile.phone) setPhone(profile.phone);
+    const profileComplete = (profile.name ?? '').trim().length >= 2 &&
+      (profile.phone ? !!normalizeEgyptianPhone(profile.phone) : !menu.restaurant.requirePhone);
+    setProfileSaved(profileComplete);
+    const prefs = readJson<CheckoutPrefs>(prefsKey(slug), {});
+    if (prefs.paymentMethod && menu.paymentMethods.some((m) => m.method === prefs.paymentMethod)) setMethod(prefs.paymentMethod);
+    if (prefs.deliveryPointId && menu.deliveryPoints.some((p) => p.id === prefs.deliveryPointId)) setPointId(prefs.deliveryPointId);
     setOnline(navigator.onLine);
     const ctrl = new AbortController();
     const refreshLive = async () => {
@@ -169,7 +178,8 @@ export function Checkout({ menu }: { menu: PublicMenu }) {
         setSubmitting(false);
         return;
       }
-      rememberOrder({ token: data.trackingToken, orderNumber: data.orderNumber, slug, createdAt: Date.now() });
+      rememberOrder({ token: data.trackingToken, orderNumber: data.orderNumber, slug, createdAt: Date.now(), lines: items, total: quote?.total });
+      writeJson(prefsKey(slug), { paymentMethod: method, deliveryPointId: pointId } satisfies CheckoutPrefs);
       writeJson(attemptKey, null, 'session');
       clear();
       router.replace('/order/' + data.trackingToken);
@@ -230,10 +240,18 @@ export function Checkout({ menu }: { menu: PublicMenu }) {
 
           <section className="checkout-card">
             <div className="checkout-card-heading"><span className="checkout-section-number">02</span><div><h2>مين هيستلم الطلب؟</h2><p>بيانات بسيطة عشان طلبك يوصل بسهولة.</p></div></div>
+            {profileSaved && !editingProfile ? (
+              <div className="saved-profile">
+                <span className="saved-profile-icon"><UserRound size={20} /></span>
+                <span><strong>{name}</strong>{phone && <span dir="ltr">{phone}</span>}<small>بياناتك محفوظة على الموبايل ده</small></span>
+                <button type="button" disabled={submitting} onClick={() => setEditingProfile(true)}><Pencil size={13} />تعديل</button>
+              </div>
+            ) : (
             <div className="customer-form-grid">
-              <div className="customer-form-field"><label htmlFor="customer-name">اسمك</label><input id="customer-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required disabled={submitting} minLength={2} maxLength={60} placeholder="الاسم اللي هنناديك بيه" /></div>
-              <div className="customer-form-field"><label htmlFor="customer-phone">رقم الموبايل {!menu.restaurant.requirePhone && <span>(اختياري)</span>}</label><input id="customer-phone" type="tel" dir="ltr" inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} autoComplete="tel" placeholder="01xxxxxxxxx" maxLength={20} required={menu.restaurant.requirePhone} disabled={submitting} aria-invalid={!!phone && !phoneValid} aria-describedby="phone-help" /><small id="phone-help" className={phone && !phoneValid ? 'field-error' : ''}>{phone && !phoneValid ? 'راجع الرقم. محتاجين رقم موبايل مصري صحيح.' : 'هنتصل بيك لو احتجنا مساعدة عند الاستلام.'}</small></div>
-            </div>
+                <div className="customer-form-field"><label htmlFor="customer-name">اسمك</label><input id="customer-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required disabled={submitting} minLength={2} maxLength={60} placeholder="الاسم اللي هنناديك بيه" /></div>
+                <div className="customer-form-field"><label htmlFor="customer-phone">رقم الموبايل {!menu.restaurant.requirePhone && <span>(اختياري)</span>}</label><input id="customer-phone" type="tel" dir="ltr" inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} autoComplete="tel" placeholder="01xxxxxxxxx" maxLength={20} required={menu.restaurant.requirePhone} disabled={submitting} aria-invalid={!!phone && !phoneValid} aria-describedby="phone-help" /><small id="phone-help" className={phone && !phoneValid ? 'field-error' : ''}>{phone && !phoneValid ? 'راجع الرقم. محتاجين رقم موبايل مصري صحيح.' : 'هنتصل بيك لو احتجنا مساعدة عند الاستلام.'}</small></div>
+              </div>
+            )}
             <button type="button" className="customer-note-toggle" disabled={submitting} onClick={() => setShowNote(!showNote)} aria-expanded={showNote} aria-controls="customer-note-field"><Plus size={13} />{showNote ? 'إخفاء ملاحظة الطلب' : 'عندك ملاحظة للمطبخ؟'}</button>
             {showNote && <div className="customer-form-field customer-note-field" id="customer-note-field"><label htmlFor="customer-note">ملاحظة الطلب <span>(اختياري)</span></label><textarea id="customer-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={300} disabled={submitting} placeholder="مثلاً: من غير بصل، أو ثومية على جنب" /><small>{note.length} / 300</small></div>}
           </section>
@@ -253,7 +271,7 @@ export function Checkout({ menu }: { menu: PublicMenu }) {
               {menu.paymentMethods.map(({ method: payment }) => <label key={payment} className={'customer-choice ' + (method === payment ? 'is-selected' : '')}><input type="radio" name="payment-method" checked={method === payment} disabled={submitting} onChange={() => setMethod(payment)} /><span className="checkout-payment-icon">{payment === 'INSTAPAY' ? <CreditCard size={18} /> : <Banknote size={18} />}</span><span>{payment === 'INSTAPAY' ? 'InstaPay' : 'كاش عند الاستلام'}<small>{payment === 'INSTAPAY' ? 'بيانات التحويل هتظهر بعد التأكيد. الدفع بيتراجع من المطعم.' : 'ادفع لما طلبك يوصل لنقطة الاستلام.'}</small></span></label>)}
             </div>
           </section>
-          {!accepting && <div className="customer-alert" role="status">{storeStatus === 'PAUSED' ? 'الطلبات متوقفة مؤقتًا بسبب ضغط المطبخ. سلتك محفوظة.' : 'المطعم مغلق حاليًا. اختياراتك محفوظة في السلة.'}</div>}
+          {!accepting && <div className="customer-alert" role="status">{menu.store.reason === 'INACTIVE' ? 'الطلب أونلاين من المطعم ده متوقف مؤقتًا.' : storeStatus === 'PAUSED' ? 'الطلبات متوقفة مؤقتًا بسبب ضغط المطبخ. سلتك محفوظة.' : 'المطعم مغلق حاليًا. اختياراتك محفوظة في السلة.'}</div>}
           {!online && <div className="customer-alert" role="status">الاتصال بالإنترنت انقطع. سلتك محفوظة وهتقدر تكمل أول ما الاتصال يرجع.</div>}
           {error && <div className="customer-alert" role="alert">{error}</div>}
         </div>

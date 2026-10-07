@@ -3,7 +3,7 @@ import { and, desc, eq, gte, lt } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { orders } from '@/server/db/schema';
 import { merchantContext } from '@/server/merchant-context';
-import { activeCounts, periodStats, salesBySource } from '@/server/services/stats';
+import { activeCounts, courierSummary, periodStats, salesBySource } from '@/server/services/stats';
 import { localDateString, localDateToUtc, startOfLocalDay } from '@/lib/domain/hours';
 import { formatMoney, formatTime } from '@/lib/domain/misc';
 import { PAYMENT_METHOD_AR, STATUS_AR, STATUS_TONE } from '@/lib/labels';
@@ -28,7 +28,7 @@ export default async function MerchantDashboard({ searchParams }: { searchParams
   const from = date ? localDateToUtc(day, tz) : startOfLocalDay(new Date(), tz);
   const to = new Date(from.getTime() + 24 * 3600_000);
 
-  const [stats, active, list, sources] = await Promise.all([
+  const [stats, active, list, sources, couriers] = await Promise.all([
     periodStats(db(), from, to, restaurant.id),
     activeCounts(db(), restaurant.id),
     db()
@@ -38,6 +38,7 @@ export default async function MerchantDashboard({ searchParams }: { searchParams
       .orderBy(desc(orders.createdAt))
       .limit(300),
     salesBySource(db(), from, to, restaurant.id),
+    courierSummary(db(), restaurant.id, from, to),
   ]);
   const pending = (active.CREATED ?? 0) + (active.AWAITING_PAYMENT ?? 0) + (active.PAYMENT_REVIEW ?? 0);
 
@@ -86,6 +87,20 @@ export default async function MerchantDashboard({ searchParams }: { searchParams
         </table>
         {list.length === 0 && <p className="py-6 text-center text-gray-400">لا توجد طلبات في هذا اليوم</p>}
       </section>
+
+      {couriers.length > 0 && (
+        <section className="card overflow-x-auto">
+          <h2 className="mb-2 font-bold">الدليفري — تسليم وتحصيل اليوم</h2>
+          <table className="table">
+            <thead><tr><th>الدليفري</th><th>في الطريق</th><th>اتسلّم</th><th>كاش اتحصّل (يتسلّم للكاشير)</th><th>كاش لسه هيتحصّل</th></tr></thead>
+            <tbody>
+              {couriers.map((c) => (
+                <tr key={c.userId}><td className="font-semibold">{c.name}</td><td>{c.onTheWay}</td><td>{c.delivered}</td><td className="font-bold">{formatMoney(c.cashCollected)}</td><td>{formatMoney(c.cashPending)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {sources.length > 0 && (
         <section className="card">

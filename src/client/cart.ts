@@ -96,7 +96,9 @@ export function useCart(slug: string) {
     [slug],
   );
   const clear = useCallback(() => save(slug, []), [slug]);
-  return { lines, add, setQuantity, clear };
+  /** Replace the cart (e.g. "order it again"); input is validated like stored carts. */
+  const replace = useCallback((next: Omit<CartLine, 'key'>[]) => save(slug, normalizeCart(next)), [slug]);
+  return { lines, add, setQuantity, clear, replace };
 }
 
 /** Display-only price estimate; the server re-prices everything at checkout. */

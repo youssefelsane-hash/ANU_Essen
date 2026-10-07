@@ -1,7 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { roles, userRoles, users } from '@/server/db/schema';
-import { createStaffAction, removeStaffRoleAction, resetStaffPasswordAction } from '@/server/actions/merchant';
+import { createStaffAction, removeStaffRoleAction, resetStaffPasswordAction, setStaffBlockedAction } from '@/server/actions/merchant';
 import { ActionForm, SubmitButton } from '@/components/forms';
 import { PROTECTED_ROLE_KEYS } from '@/lib/domain/permissions';
 
@@ -20,13 +20,17 @@ export async function StaffManager({ restaurantId, canAssignProtected, currentUs
   const assignable = storeRoles.filter((r) => canAssignProtected || !PROTECTED_ROLE_KEYS.includes(r.key));
   return (
     <div className="space-y-4">
+      <p className="rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-900">
+        Only the emails listed here can sign in to this restaurant. Block someone to sign them out on every device immediately.
+        <span className="block" dir="rtl">الإيميلات اللي في الجدول ده بس هي اللي تقدر تدخل على المطعم. «Block» بيقفل الحساب ويطلّعه من كل الأجهزة فورًا.</span>
+      </p>
       <section className="card overflow-x-auto">
         <table className="table">
           <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Last login</th><th></th></tr></thead>
           <tbody>
             {assignments.map((a) => (
               <tr key={a.id}>
-                <td className="font-semibold">{a.name}{!a.isActive && <span className="badge ms-2 bg-red-100 text-red-700">disabled</span>}</td>
+                <td className="font-semibold">{a.name}{!a.isActive && <span className="badge ms-2 bg-red-100 text-red-700">blocked · موقوف</span>}</td>
                 <td dir="ltr">{a.email}</td>
                 <td>{a.roleName}</td>
                 <td className="text-xs text-gray-500">{a.lastLoginAt ? a.lastLoginAt.toISOString().slice(0, 16).replace('T', ' ') : '—'}</td>
@@ -34,6 +38,11 @@ export async function StaffManager({ restaurantId, canAssignProtected, currentUs
                   {a.userId !== currentUserId && (canAssignProtected || !PROTECTED_ROLE_KEYS.includes(a.roleKey)) && (
                     <form action={removeStaffRoleAction.bind(null, a.id)}>
                       <button className="btn btn-ghost btn-sm text-red-600">Remove role</button>
+                    </form>
+                  )}
+                  {a.userId !== currentUserId && (
+                    <form action={setStaffBlockedAction.bind(null, restaurantId, a.userId, a.isActive)}>
+                      <button className={`btn btn-sm ${a.isActive ? 'btn-danger' : 'btn-success'}`}>{a.isActive ? 'Block · إيقاف' : 'Unblock · تفعيل'}</button>
                     </form>
                   )}
                   {a.userId !== currentUserId && (

@@ -109,7 +109,8 @@ export async function loadPromotionRules(d: Db, restaurantId: string): Promise<P
 
 export async function loadPublicMenu(d: Db, slug: string, now = new Date()): Promise<PublicMenu | null> {
   const r = await getRestaurantBySlug(d, slug);
-  if (!r || !r.isActive) return null;
+  // A suspended restaurant still resolves (QR codes keep working) and shows a clear message instead of a 404.
+  if (!r) return null;
 
   const [catalog, categoryRows, bannerRows, methodRows, pointRows, live] = await Promise.all([
     loadMenuCatalog(d, r.id),

@@ -28,9 +28,14 @@ export async function loginAction(_prev: ActionState, fd: FormData): Promise<Act
   // Always run a hash comparison so response time doesn't reveal whether the email exists.
   dummyHash ??= hashPassword('not-the-password');
   const valid = await verifyPassword(password, user?.passwordHash ?? (await dummyHash));
-  if (!user || !user.isActive || !valid) {
+  if (!user || !valid) {
     await audit({ actor: { type: 'SYSTEM', label: email }, action: 'auth.login_failed', entity: 'user', entityId: user?.id ?? null, ip: meta.ip, userAgent: meta.userAgent });
     return { ok: false, error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة', at: Date.now() };
+  }
+  // Only revealed after a correct password, so it doesn't leak which emails exist.
+  if (!user.isActive) {
+    await audit({ actor: { type: 'SYSTEM', label: email }, action: 'auth.login_blocked', entity: 'user', entityId: user.id, ip: meta.ip, userAgent: meta.userAgent });
+    return { ok: false, error: 'الحساب ده موقوف. كلّم صاحب المطعم أو إدارة المنصة.', at: Date.now() };
   }
 
   await createSession(user.id, meta);

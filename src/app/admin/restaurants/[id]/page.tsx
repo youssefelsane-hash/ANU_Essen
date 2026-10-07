@@ -5,7 +5,7 @@ import { db } from '@/server/db';
 import { deliveryPoints, restaurantPaymentMethods } from '@/server/db/schema';
 import { adminPage } from '@/server/admin-guard';
 import { getRestaurant } from '@/server/services/store';
-import { saveDeliveryPointAction, updatePaymentMethodAction, updateRestaurantAction } from '@/server/actions/admin-restaurants';
+import { resumeRestaurantAction, saveDeliveryPointAction, suspendRestaurantAction, updatePaymentMethodAction, updateRestaurantAction } from '@/server/actions/admin-restaurants';
 import { ActionForm, SubmitButton } from '@/components/forms';
 import { HoursEditor } from '@/components/admin/editors';
 import { RestaurantBrandEditor } from '@/components/admin/restaurant-brand-editor';
@@ -41,6 +41,7 @@ export default async function RestaurantSettingsPage({ params }: { params: Promi
         <a href={`/s/${r.slug}`} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">Open customer menu ↗</a>
       </PageTitle>
       <RestaurantTabs id={id} active="settings" />
+      <ServiceStatus restaurant={r} />
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="card">
           <h2 className="mb-1 font-bold">Restaurant identity & operations</h2>
@@ -62,7 +63,6 @@ export default async function RestaurantSettingsPage({ params }: { params: Promi
             <Field label="Platform commission (%)"><input name="commissionPercent" defaultValue={r.commissionBps / 100} className="input" inputMode="decimal" /></Field>
             <Field label="Cancel unpaid InstaPay orders after (min, 0 = never)"><input name="unpaidTimeoutMinutes" defaultValue={r.unpaidTimeoutMinutes} className="input" inputMode="numeric" /></Field>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="requirePhone" defaultChecked={r.requirePhone} /> Phone number required at checkout</label>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="isActive" defaultChecked={r.isActive} /> Restaurant active</label>
             <div className="sm:col-span-2">
               <label className="label">Opening hours ({r.timezone})</label>
               <HoursEditor name="openingHours" initial={r.openingHours ?? null} />
@@ -120,5 +120,42 @@ export default async function RestaurantSettingsPage({ params }: { params: Promi
         </div>
       </div>
     </div>
+  );
+}
+
+function ServiceStatus({ restaurant: r }: { restaurant: { id: string; isActive: boolean; suspendedReason: string | null; suspendedAt: Date | null } }) {
+  if (!r.isActive) {
+    return (
+      <section className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border-2 border-red-300 bg-red-50 p-4">
+        <div>
+          <h2 className="font-bold text-red-800">Service suspended · الخدمة موقوفة</h2>
+          <p className="text-sm text-red-700">
+            Customers can&apos;t order and the restaurant can&apos;t reopen. Orders already in progress can still be finished.
+            {r.suspendedReason && <> Reason: <b>{r.suspendedReason}</b></>}
+            {r.suspendedAt && <> · since {r.suspendedAt.toISOString().slice(0, 16).replace('T', ' ')} UTC</>}
+          </p>
+        </div>
+        <form action={resumeRestaurantAction.bind(null, r.id)}>
+          <button className="btn btn-success">Resume service · تشغيل الخدمة</button>
+        </form>
+      </section>
+    );
+  }
+  return (
+    <section className="mb-6 rounded-2xl border border-gray-200 bg-white p-4">
+      <details>
+        <summary className="cursor-pointer text-sm font-semibold text-gray-700">
+          <span className="me-2 inline-block size-2 rounded-full bg-emerald-500" />Service active · Suspend this restaurant…
+        </summary>
+        <ActionForm action={suspendRestaurantAction} className="mt-3 flex flex-wrap items-end gap-2" confirm="Suspend this restaurant? Customers will not be able to order until you resume it.">
+          <input type="hidden" name="restaurantId" value={r.id} />
+          <label className="min-w-64 flex-1">
+            <span className="label">Reason (shown on the restaurant&apos;s screen)</span>
+            <input name="reason" required minLength={3} maxLength={200} className="input" placeholder="e.g. commission overdue / contract paused" />
+          </label>
+          <SubmitButton className="btn btn-danger">Suspend service · إيقاف الخدمة</SubmitButton>
+        </ActionForm>
+      </details>
+    </section>
   );
 }

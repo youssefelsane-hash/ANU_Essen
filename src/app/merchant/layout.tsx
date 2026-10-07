@@ -52,6 +52,11 @@ export default async function MerchantLayout({ children }: { children: React.Rea
           <form action={logoutAction}><button className="rounded-lg px-2 py-1 text-xs hover:bg-white/10">خروج</button></form>
         </div>
       </nav>
+      {!restaurant.isActive && (
+        <div className="bg-red-700 px-4 py-2 text-center text-sm font-semibold text-white" role="alert">
+          الخدمة موقوفة من إدارة المنصة{restaurant.suspendedReason ? ` — ${restaurant.suspendedReason}` : ''}. مفيش طلبات جديدة، وتقدروا تكمّلوا الطلبات الحالية.
+        </div>
+      )}
       {children}
       <ServiceWorkerRegister />
     </div>
