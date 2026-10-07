@@ -8,8 +8,8 @@ export function PageTitle({ title, subtitle, children }: { title: string; subtit
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-2xl font-extrabold">{title}</h1>
-        {subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
+        <h1 className="admin-page-title">{title}</h1>
+        {subtitle && <p className="mt-2 max-w-3xl text-xs leading-relaxed text-gray-500">{subtitle}</p>}
       </div>
       {children}
     </div>
@@ -18,9 +18,9 @@ export function PageTitle({ title, subtitle, children }: { title: string; subtit
 
 export function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
-    <div className="card">
+    <div className="card admin-stat">
       <div className="text-xs font-medium text-gray-500">{label}</div>
-      <div className="mt-1 text-2xl font-black">{value}</div>
+      <div className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">{value}</div>
       {hint && <div className="mt-0.5 text-xs text-gray-400">{hint}</div>}
     </div>
   );

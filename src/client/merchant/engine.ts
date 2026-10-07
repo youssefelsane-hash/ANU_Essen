@@ -1,5 +1,5 @@
 import { uuid } from '@/client/ids';
-import { isTerminal, nextStatus, primaryActionFor, STATUS_TIMESTAMP_FIELD, TRANSITIONS, type OrderAction } from '@/lib/domain/order-machine';
+import { isTerminal, nextStatus, paymentStatusAfter, primaryActionFor, STATUS_TIMESTAMP_FIELD, TRANSITIONS, type OrderAction } from '@/lib/domain/order-machine';
 import type { ActionResult, OrderSnapshot, StoreLive, SyncResponse } from '@/lib/types';
 import { openLocalDb, readMeta, type LocalDb, type OutboxEntry } from './local-db';
 
@@ -65,7 +65,8 @@ export function applyPending(order: OrderSnapshot, pending: OutboxEntry[]): Orde
     if (!next) continue;
     const field = STATUS_TIMESTAMP_FIELD[next];
     view = { ...view, status: next, ...(field ? { [field]: p.occurredAt } : {}) };
-    if (p.action === 'VERIFY_PAYMENT') view = { ...view, paymentStatus: 'PAYMENT_VERIFIED' };
+    const paymentStatus = paymentStatusAfter(p.action, view.paymentMethod, view.paymentStatus);
+    if (paymentStatus) view = { ...view, paymentStatus };
     if (p.action === 'CANCEL') view = { ...view, cancelReason: p.payload?.reason ?? null };
   }
   return view;
@@ -106,6 +107,7 @@ export class MerchantEngine {
 
   constructor(
     private readonly restaurantId: string,
+    private readonly userId: string,
     private readonly permissions: ReadonlySet<string>,
     private readonly onAlert: (orders: OrderSnapshot[]) => void,
   ) {}
@@ -122,7 +124,7 @@ export class MerchantEngine {
   }
 
   async start() {
-    this.db = await openLocalDb(this.restaurantId);
+    this.db = await openLocalDb(this.restaurantId, this.userId, this.permissions);
     if (this.stopped) {
       this.db.close();
       return;

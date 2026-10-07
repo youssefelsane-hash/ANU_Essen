@@ -24,9 +24,13 @@ interface MerchantDB extends DBSchema {
 
 export type LocalDb = IDBPDatabase<MerchantDB>;
 
-/** One IndexedDB database per restaurant (a super admin may switch between stores on one device). */
-export function openLocalDb(restaurantId: string): Promise<LocalDb> {
-  return openDB<MerchantDB>(`merchant:${restaurantId}`, 1, {
+/** Isolate cached phones, visible orders and pending actions on shared restaurant terminals. */
+export function merchantCacheKey(restaurantId: string, userId: string, permissions: Iterable<string>): string {
+  return `merchant:v2:${restaurantId}:${userId}:${[...permissions].sort().join(',')}`;
+}
+
+export function openLocalDb(restaurantId: string, userId: string, permissions: Iterable<string>): Promise<LocalDb> {
+  return openDB<MerchantDB>(merchantCacheKey(restaurantId, userId, permissions), 1, {
     upgrade(db) {
       db.createObjectStore('orders', { keyPath: 'id' });
       const outbox = db.createObjectStore('outbox', { keyPath: 'eventId' });

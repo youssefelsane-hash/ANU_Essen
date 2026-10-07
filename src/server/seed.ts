@@ -28,6 +28,7 @@ import {
 import { hashPassword } from './auth/password';
 import { PERMISSIONS, SYSTEM_ROLES, type Permission } from '../lib/domain/permissions';
 import { DEFAULT_QUEUE_CONFIG, type QueueConfig } from '../lib/domain/queue';
+import { restaurantBrandSchema } from '../lib/domain/restaurant-brand';
 
 export async function seedRbac(d: Db) {
   for (const [key, def] of Object.entries(PERMISSIONS)) {
@@ -85,23 +86,23 @@ export async function assignRole(d: Db, userId: string, roleKey: string, restaur
 /** Creates everything a new restaurant needs to take orders (counters, queue config, payment methods). */
 export async function bootstrapRestaurant(
   d: Db,
-  data: { slug: string; nameAr: string; nameEn: string; commissionBps?: number; phone?: string | null },
+  data: { slug: string; nameAr: string; nameEn: string; commissionBps?: number; phone?: string | null; badgeText?: string | null; taglineAr?: string | null; brandColor?: string; logoUrl?: string | null; coverImageUrl?: string | null },
   queue: QueueConfig = DEFAULT_QUEUE_CONFIG,
 ) {
-  const [r] = await d
-    .insert(restaurants)
-    .values({ slug: data.slug, nameAr: data.nameAr, nameEn: data.nameEn, commissionBps: data.commissionBps ?? 500, phone: data.phone ?? null })
-    .returning();
-  await d.insert(storeCounters).values({ restaurantId: r.id }).onConflictDoNothing();
-  await d.insert(queueConfigs).values({ restaurantId: r.id, config: queue }).onConflictDoNothing();
-  await d
-    .insert(restaurantPaymentMethods)
-    .values([
+  const brand = restaurantBrandSchema.parse(data);
+  return d.transaction(async (tx) => {
+    const [r] = await tx
+      .insert(restaurants)
+      .values({ ...brand, slug: data.slug, commissionBps: data.commissionBps ?? 500, phone: data.phone ?? null })
+      .returning();
+    await tx.insert(storeCounters).values({ restaurantId: r.id });
+    await tx.insert(queueConfigs).values({ restaurantId: r.id, config: queue });
+    await tx.insert(restaurantPaymentMethods).values([
       { restaurantId: r.id, method: 'INSTAPAY', isEnabled: false, config: {}, sortOrder: 0 },
       { restaurantId: r.id, method: 'CASH', isEnabled: true, config: {}, sortOrder: 1 },
-    ])
-    .onConflictDoNothing();
-  return r;
+    ]);
+    return r;
+  });
 }
 
 const p = (egp: number) => Math.round(egp * 100);
@@ -133,13 +134,13 @@ export async function seedDemoRestaurant(d: Db, opts: { demoPassword?: string | 
     };
   }
 
-  const r = await bootstrapRestaurant(d, { slug, nameAr: 'الرايظ الدمشقية', nameEn: 'Al Rayez Damascene', commissionBps: 500 });
+  const r = await bootstrapRestaurant(d, { slug, nameAr: 'الراية الدمشقية', nameEn: 'Al Raya Al Dimashqia', badgeText: 'الراية', taglineAr: 'من قلب الشام، لحد عندك', brandColor: '#163d35', coverImageUrl: '/images/restaurant-hero.webp', commissionBps: 500 });
   await d
     .update(restaurantPaymentMethods)
     .set({
       isEnabled: true,
       config: {
-        accountName: 'Al Rayez Damascene',
+        accountName: 'Al Raya Al Dimashqia',
         address: 'alrayez@instapay',
         phone: '01000000000',
         instructions: 'اكتب رقم الطلب في ملاحظة التحويل لو تقدر',
@@ -168,9 +169,9 @@ export async function seedDemoRestaurant(d: Db, opts: { demoPassword?: string | 
   const productRows = await d
     .insert(products)
     .values([
-      { restaurantId: r.id, categoryId: sandwiches.id, nameAr: 'ساندوتش شاورما فراخ', nameEn: 'Chicken Shawarma Sandwich', descriptionAr: 'شاورما فراخ بالثومية والمخلل', basePrice: p(60), prepLoadUnits: 1, sortOrder: 1 },
-      { restaurantId: r.id, categoryId: sandwiches.id, nameAr: 'ساندوتش شاورما لحمة', nameEn: 'Meat Shawarma Sandwich', descriptionAr: 'شاورما لحمة بالطحينة', basePrice: p(75), prepLoadUnits: 1, sortOrder: 2 },
-      { restaurantId: r.id, categoryId: meals.id, nameAr: 'وجبة شاورما', nameEn: 'Shawarma Meal', descriptionAr: 'شاورما عربي + بطاطس + ثومية + مخلل', basePrice: p(140), prepLoadUnits: 2, sortOrder: 1 },
+      { restaurantId: r.id, categoryId: sandwiches.id, nameAr: 'ساندوتش شاورما فراخ', nameEn: 'Chicken Shawarma Sandwich', descriptionAr: 'شاورما فراخ بالثومية والمخلل', imageUrl: '/images/chicken-shawarma.webp', basePrice: p(60), prepLoadUnits: 1, sortOrder: 1 },
+      { restaurantId: r.id, categoryId: sandwiches.id, nameAr: 'ساندوتش شاورما لحمة', nameEn: 'Meat Shawarma Sandwich', descriptionAr: 'شاورما لحمة بالطحينة', imageUrl: '/images/beef-shawarma.webp', basePrice: p(75), prepLoadUnits: 1, sortOrder: 2 },
+      { restaurantId: r.id, categoryId: meals.id, nameAr: 'وجبة شاورما', nameEn: 'Shawarma Meal', descriptionAr: 'شاورما عربي + بطاطس + ثومية + مخلل', imageUrl: '/images/chicken-shawarma.webp', basePrice: p(140), prepLoadUnits: 2, sortOrder: 1 },
       { restaurantId: r.id, categoryId: sides.id, nameAr: 'بطاطس', nameEn: 'Fries', basePrice: p(35), prepLoadUnits: 1, sortOrder: 1 },
       { restaurantId: r.id, categoryId: drinks.id, nameAr: 'مشروب غازي', nameEn: 'Soft Drink', basePrice: p(20), prepLoadUnits: 0, sortOrder: 1 },
     ])
@@ -213,8 +214,8 @@ export async function seedDemoRestaurant(d: Db, opts: { demoPassword?: string | 
     ])
     .returning();
   await d.insert(banners).values([
-    { restaurantId: r.id, titleAr: 'اطلب دلوقتي واستلم عند بوابة الجامعة', subtitleAr: 'من غير ما تمشي ولا تستنى في الطابور', bgColor: '#c2410c', sortOrder: 1 },
-    { restaurantId: r.id, titleAr: 'خصم 10% على أول طلب', subtitleAr: 'استخدم كود WELCOME10 (من 100 ج.م)', bgColor: '#166534', promotionId: welcome.id, sortOrder: 2 },
+    { restaurantId: r.id, titleAr: 'طعم شامي، على أصوله', subtitleAr: 'شاورما معمولة بحب. اطلب دلوقتي واستلم عند بوابة الجامعة.', imageUrl: '/images/restaurant-hero.webp', bgColor: '#163d35', sortOrder: 1 },
+    { restaurantId: r.id, titleAr: 'خصم 10% على طلبك', subtitleAr: 'استخدم كود WELCOME10 (من 100 ج.م)', bgColor: '#166534', promotionId: welcome.id, sortOrder: 2 },
   ]);
 
   if (opts.demoPassword) {

@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 
-/** Generates the PWA PNG icons (no image dependencies): orange tile with a plate. */
+/** Generates the PWA PNG icons (no image dependencies): deep olive tile with a cream plate. */
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   let c = n;
   for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -28,7 +28,7 @@ function icon(size: number): Buffer {
     const row = Buffer.alloc(1 + size * 3);
     for (let x = 0; x < size; x++) {
       const d = Math.hypot(x + 0.5 - c, y + 0.5 - c) / size;
-      const [r, g, b] = d < 0.17 ? [0xf9, 0x73, 0x16] : d < 0.28 ? [0xff, 0xff, 0xff] : [0xc2, 0x41, 0x0c];
+      const [r, g, b] = d < 0.17 ? [0xc7, 0xa9, 0x71] : d < 0.28 ? [0xf5, 0xf2, 0xeb] : [0x17, 0x2c, 0x22];
       row[1 + x * 3] = r;
       row[2 + x * 3] = g;
       row[3 + x * 3] = b;

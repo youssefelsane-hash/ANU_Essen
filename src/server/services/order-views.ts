@@ -12,8 +12,19 @@ import {
   users,
 } from '../db/schema';
 import type { OrderSnapshot, SnapshotItem, TimelineEntry, TrackingView } from '../../lib/types';
+import { expireUnpaidOrder } from './order-actions';
 
 const ms = (d: Date | null | undefined) => (d ? d.getTime() : null);
+
+function safePaymentLink(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 async function loadItems(d: Db, orderIds: string[]): Promise<Map<string, SnapshotItem[]>> {
   const itemRows = orderIds.length
@@ -133,13 +144,18 @@ export async function loadOrderSnapshots(d: Db, orderIds: string[], opts: Snapsh
 
 /** Public tracking page data — only what the customer needs, looked up by the unguessable token. */
 export async function loadTrackingView(d: Db, token: string): Promise<TrackingView | null> {
-  const [o] = await d.select().from(orders).where(eq(orders.trackingToken, token));
+  let [o] = await d.select().from(orders).where(eq(orders.trackingToken, token));
   if (!o) return null;
+  if (o.status === 'AWAITING_PAYMENT' && await expireUnpaidOrder(o.id)) {
+    [o] = await d.select().from(orders).where(eq(orders.trackingToken, token));
+    if (!o) return null;
+  }
   const [[r], itemsByOrder, [payment]] = await Promise.all([
     d.select().from(restaurants).where(eq(restaurants.id, o.restaurantId)),
     loadItems(d, [o.id]),
     d.select().from(payments).where(eq(payments.orderId, o.id)),
   ]);
+  if (!r) return null;
   let instapay: TrackingView['instapay'] = null;
   if (o.paymentMethod === 'INSTAPAY') {
     const [m] = await d
@@ -151,7 +167,7 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
       accountName: c.accountName ?? null,
       address: c.address ?? null,
       phone: c.phone ?? null,
-      link: c.link ?? null,
+      link: safePaymentLink(c.link),
       instructions: c.instructions ?? null,
     };
   }
@@ -183,7 +199,7 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
       completedAt: ms(o.completedAt),
       cancelledAt: ms(o.cancelledAt),
       cancelReason: o.cancelReason,
-      paymentDeadlineAt: o.status === 'AWAITING_PAYMENT' && r ? o.createdAt.getTime() + r.unpaidTimeoutMinutes * 60_000 : null,
+      paymentDeadlineAt: o.status === 'AWAITING_PAYMENT' && r.unpaidTimeoutMinutes > 0 ? o.updatedAt.getTime() + r.unpaidTimeoutMinutes * 60_000 : null,
     },
     restaurant: { nameAr: r.nameAr, nameEn: r.nameEn, phone: r.phone, slug: r.slug, timezone: r.timezone },
     instapay,

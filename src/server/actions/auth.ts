@@ -19,10 +19,10 @@ export async function loginAction(_prev: ActionState, fd: FormData): Promise<Act
   const password = String(fd.get('password') ?? '');
   const next = String(fd.get('next') ?? '');
   const meta = await requestMeta();
-  if (!email || !password) return { ok: false, error: 'Enter email and password', at: Date.now() };
+  if (!email || !password) return { ok: false, error: 'اكتب البريد الإلكتروني وكلمة المرور', at: Date.now() };
 
   const { allowed } = await hitRateLimit(`login:${meta.ip ?? 'unknown'}:${email}`, 10, 900);
-  if (!allowed) return { ok: false, error: 'Too many attempts — try again in 15 minutes', at: Date.now() };
+  if (!allowed) return { ok: false, error: 'محاولات كتير. جرّب تاني بعد 15 دقيقة', at: Date.now() };
 
   const [user] = await db().select().from(users).where(eq(users.email, email));
   // Always run a hash comparison so response time doesn't reveal whether the email exists.
@@ -30,7 +30,7 @@ export async function loginAction(_prev: ActionState, fd: FormData): Promise<Act
   const valid = await verifyPassword(password, user?.passwordHash ?? (await dummyHash));
   if (!user || !user.isActive || !valid) {
     await audit({ actor: { type: 'SYSTEM', label: email }, action: 'auth.login_failed', entity: 'user', entityId: user?.id ?? null, ip: meta.ip, userAgent: meta.userAgent });
-    return { ok: false, error: 'Wrong email or password', at: Date.now() };
+    return { ok: false, error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة', at: Date.now() };
   }
 
   await createSession(user.id, meta);

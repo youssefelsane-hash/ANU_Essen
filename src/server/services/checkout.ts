@@ -19,10 +19,11 @@ import { initialStatusFor, type OrderStatus, type PaymentMethod } from '../../li
 import { egp, priceCart, type PricedCart } from '../../lib/domain/pricing';
 import { formatOrderNumber, normalizeEgyptianPhone } from '../../lib/domain/misc';
 import { acceptsOrders } from '../../lib/domain/store-status';
+import { computeEta } from '../../lib/domain/queue';
 import type { CreateOrderInput } from '../../lib/validation';
 import type { QuoteResponse } from '../../lib/types';
 import { loadMenuCatalog, loadPromotionRules } from './menu';
-import { closedMessage, getRestaurantBySlug, getStoreLive, type RestaurantRow } from './store';
+import { closedMessage, getRestaurant, getRestaurantBySlug, getStoreLive, type RestaurantRow } from './store';
 
 async function resolveDeliveryPoint(d: Db, restaurantId: string, id?: string | null) {
   const rows = await d
@@ -81,8 +82,9 @@ export async function quote(slug: string, input: { items: CreateOrderInput['item
   const r = await getRestaurantBySlug(d, slug);
   if (!r || !r.isActive) throw new AppError('NOT_FOUND', 'المحل غير موجود');
   const now = new Date();
-  const [{ priced }, live] = await Promise.all([priceFor(d, r, input, now), getStoreLive(d, r, now)]);
-  return toQuote(priced, live.etaMinutes);
+  const [{ priced, point }, live] = await Promise.all([priceFor(d, r, input, now), getStoreLive(d, r, now)]);
+  const eta = computeEta({ confirmedAt: now, activeLoad: live.load, orderLoad: priced.loadUnits, config: live.config, extraDeliveryMinutes: point.extraMinutes });
+  return toQuote(priced, eta.prepMinutes + eta.deliveryMinutes);
 }
 
 export interface CreatedOrder {
@@ -149,35 +151,38 @@ export async function createOrder(slug: string, input: CreateOrderInput, idempot
     phone = normalizeEgyptianPhone(input.customerPhone);
     if (!phone) throw new AppError('VALIDATION', 'رقم الموبايل غير صحيح', { field: 'customerPhone' });
   }
-  if (r.requirePhone && !phone) throw new AppError('VALIDATION', 'رقم الموبايل مطلوب', { field: 'customerPhone' });
-
-  const live = await getStoreLive(d, r, now);
-  if (!acceptsOrders(live.status)) {
-    throw new AppError(live.status === 'PAUSED' ? 'STORE_PAUSED' : 'STORE_CLOSED', closedMessage(live.status));
-  }
-
-  const [method] = await d
-    .select()
-    .from(restaurantPaymentMethods)
-    .where(and(eq(restaurantPaymentMethods.restaurantId, r.id), eq(restaurantPaymentMethods.method, input.paymentMethod)));
-  if (!method?.isEnabled) throw new AppError('PAYMENT_METHOD_DISABLED', 'طريقة الدفع دي مش متاحة حاليًا');
-
-  const { priced, point } = await priceFor(d, r, input, now);
-  if (input.promoCode && priced.promoError) throw new AppError('PROMO_INVALID', priced.promoError.message);
-  if (priced.minOrderShortfall > 0) throw new AppError('MIN_ORDER', `الحد الأدنى للطلب ${egp(priced.minOrderAmount)} ج.م`);
-
   const { status, paymentStatus } = initialStatusFor(input.paymentMethod);
   const trackingToken = randomBytes(18).toString('base64url');
 
   try {
     return await d.transaction(async (tx) => {
-      // Locks the counters row: order numbers and event cursors are allocated in commit order.
-      const [counter] = await tx
-        .update(storeCounters)
+      // A concurrent retry waits here, then replays the committed order before checking
+      // stock, payment methods or the last remaining promotion use.
+      const [lockedCounter] = await tx.select().from(storeCounters).where(eq(storeCounters.restaurantId, r.id)).for('update');
+      if (!lockedCounter) throw new AppError('INTERNAL', 'Restaurant counters missing');
+      const concurrentOrder = await findByIdempotencyKey(tx, r.id, idempotencyKey);
+      if (concurrentOrder) return replay(concurrentOrder, requestHash);
+
+      // Recheck admission under the same per-store lock used by confirmations. A queue that
+      // filled after the checkout screen opened must not silently accept another order.
+      const currentRestaurant = await getRestaurant(tx, r.id);
+      if (!currentRestaurant) throw new AppError('NOT_FOUND', 'المحل غير موجود');
+      if (currentRestaurant.requirePhone && !phone) throw new AppError('VALIDATION', 'رقم الموبايل مطلوب', { field: 'customerPhone' });
+      const currentLive = await getStoreLive(tx, currentRestaurant, now);
+      if (!acceptsOrders(currentLive.status)) {
+        throw new AppError(currentLive.status === 'PAUSED' ? 'STORE_PAUSED' : 'STORE_CLOSED', closedMessage(currentLive.status));
+      }
+      const [method] = await tx.select().from(restaurantPaymentMethods)
+        .where(and(eq(restaurantPaymentMethods.restaurantId, r.id), eq(restaurantPaymentMethods.method, input.paymentMethod)));
+      if (!method?.isEnabled) throw new AppError('PAYMENT_METHOD_DISABLED', 'طريقة الدفع دي مش متاحة حاليًا');
+      const { priced, point } = await priceFor(tx, currentRestaurant, input, now);
+      if (input.promoCode && priced.promoError) throw new AppError('PROMO_INVALID', priced.promoError.message);
+      if (priced.minOrderShortfall > 0) throw new AppError('MIN_ORDER', `الحد الأدنى للطلب ${egp(priced.minOrderAmount)} ج.م`);
+      const provisionalEta = computeEta({ confirmedAt: now, activeLoad: currentLive.load, orderLoad: priced.loadUnits, config: currentLive.config, extraDeliveryMinutes: point.extraMinutes });
+
+      const [counter] = await tx.update(storeCounters)
         .set({ orderSeq: sql`${storeCounters.orderSeq} + 1`, eventSeq: sql`${storeCounters.eventSeq} + 1` })
-        .where(eq(storeCounters.restaurantId, r.id))
-        .returning();
-      if (!counter) throw new AppError('INTERNAL', 'Restaurant counters missing');
+        .where(eq(storeCounters.restaurantId, r.id)).returning();
 
       let customerId: string | null = null;
       if (phone) {
@@ -224,7 +229,7 @@ export async function createOrder(slug: string, input: CreateOrderInput, idempot
           discountTotal: priced.discount,
           deliveryFee: priced.deliveryFee,
           total: priced.total,
-          currency: r.currency,
+          currency: currentRestaurant.currency,
           commissionBps: priced.commissionBps,
           commissionAmount: priced.commissionAmount,
           merchantNet: priced.merchantNet,
@@ -232,6 +237,8 @@ export async function createOrder(slug: string, input: CreateOrderInput, idempot
           promotionId: priced.promotion?.id ?? null,
           promoCode: priced.promotion?.code ?? null,
           source: input.source || null,
+          estimatedReadyAt: provisionalEta.readyAt,
+          estimatedArrivalAt: provisionalEta.arrivalAt,
           createdAt: now,
           updatedAt: now,
         })

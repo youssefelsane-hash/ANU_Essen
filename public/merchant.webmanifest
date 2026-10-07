@@ -5,8 +5,8 @@
   "scope": "/merchant",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#111827",
-  "theme_color": "#111827",
+  "background_color": "#172c22",
+  "theme_color": "#172c22",
   "lang": "ar",
   "dir": "rtl",
   "icons": [

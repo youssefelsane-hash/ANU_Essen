@@ -3,7 +3,18 @@
 > منصة طلبات بالـ QR لطلاب جامعة الإسكندرية الأهلية. الطالب يعمل Scan → يختار من المنيو → يدفع InstaPay أو كاش → يتابع عداد الوقت → يستلم عند بوابة الباركينج.
 > المحل عنده شاشة مطبخ بتشتغل **حتى لو النت قطع**، وصاحب المنصة عنده لوحة كاملة للعمولة والإعدادات.
 
-First restaurant: **الرايظ الدمشقية**. The system is multi-restaurant from day one.
+First restaurant: **الراية الدمشقية**. Each restaurant has independent branding, menu, staff, payment settings, queue configuration and a permanent QR link.
+
+## Premium ordering update — 7 October 2026
+
+- Arabic mobile-first menu with search, category filters, accessible product customization, saved baskets and previous-order tracking.
+- Compact checkout with editable quantities, promo codes, pickup choices, accurate cart-specific ETA and safe retry behavior.
+- Tracking with server-corrected countdowns, explicit provisional estimates, delayed-order wording and manual InstaPay review.
+- Super admin controls restaurant names, badge, tagline, logo, cover and color with live previews.
+- Permanent `/q/{restaurantId}` codes redirect to the current `/s/{slug}`. PNG, SVG and branded poster exports include a scannable white margin. Old `/s/...` codes still depend on their original slug.
+- Ordering/expiry concurrency and tenant isolation fixes, including user- and permission-scoped offline caches.
+
+The supplied food photography is **illustrative demo imagery**. Replace it with actual restaurant/product photos before launch. Provenance is documented in `public/images/README.md`.
 
 ```
 Student:   QR → Menu → Cart → Checkout → InstaPay / Cash → Order # → Live countdown → Delivered at the gate
@@ -48,7 +59,8 @@ src/
   client/merchant/         ← offline engine (IndexedDB, outbox, sync)
   components/              ← customer / merchant / admin UI
   app/
-    s/[slug]               ← customer menu (QR target)   /s/[slug]/checkout
+    q/[id]                 ← permanent restaurant QR redirect
+    s/[slug]               ← customer menu   /s/[slug]/checkout
     order/[token]          ← tracking page (unguessable token, no account)
     merchant/*             ← merchant PWA: kitchen screen, dashboard, menu, staff
     admin/*                ← super admin
@@ -67,7 +79,7 @@ cp .env.example .env          # then set SEED_ADMIN_PASSWORD / SEED_DEMO_PASSWOR
 npm install
 npm run db:up                 # Postgres 17 in Docker
 npm run db:migrate
-npm run db:seed               # roles, super admin, demo restaurant "الرايظ الدمشقية"
+npm run db:seed               # roles, super admin, demo restaurant "الراية الدمشقية"
 npm run dev
 ```
 
@@ -78,7 +90,7 @@ npm run dev
 - Promo code in the seed: `WELCOME10` (10% from 100 EGP, max 30 EGP)
 
 ```bash
-npm test            # 53 tests: domain units + integration + full acceptance scenario
+npm test            # 78 tests: domain units + integration + full acceptance scenario
 npm run typecheck
 npm run db:reset    # local only: wipe, migrate, seed
 ```
@@ -100,7 +112,8 @@ Tests need no Docker: they run the real SQL migrations on an in-memory Postgres 
    DATABASE_URL=… SEED_ADMIN_EMAIL=you@… SEED_ADMIN_PASSWORD='a-long-password' SEED_DEMO=false npm run db:seed
    ```
    (Use `SEED_DEMO=true` + `SEED_DEMO_PASSWORD` for a demo restaurant.)
-5. Sign in → Admin → Restaurants → configure InstaPay, opening hours, queue → Marketing tab → download the QR (PNG/SVG) for posters.
+5. Sign in → Admin → Restaurants → configure identity, InstaPay, opening hours and queue → Marketing tab → download the QR (PNG/SVG) or branded poster.
+6. Set `APP_URL` to the actual public HTTPS origin before generating print files. Localhost QR codes are for this computer only. Physically scan the final print on several phones before distributing it.
 
 No secrets are committed; `.env` is git-ignored.
 
@@ -210,13 +223,36 @@ The receipt is designed for 80 mm (or 58 mm) thermal printers using print CSS (`
 
 ## 11. Tests
 
-`npm test` runs 53 tests:
+`npm test` runs 78 tests:
 - `queue.test.ts`: the spec's load→prep table (25→7, 35→8, 48→10, 55→12…), config-driven, ETA math, load levels
 - `order-machine.test.ts`: allowed and forbidden transitions, actor rules, payment status
 - `pricing.test.ts`: variants, add-ons, availability, promo codes and limits, the spec's commission example (200−20=180 → 9 → net 171)
 - `hours.test.ts`: overnight hours, DST, local day boundaries, phone normalisation, order numbers
 - `integration.test.ts`: idempotent creation (sequential and concurrent), price and commission snapshots, pause and capacity, promo usage limits, payment verification and ETA from load, offline action idempotency and timestamps, missed-order sync by cursor, delivery and kitchen visibility, cross-restaurant permission isolation, unpaid expiry
 - `acceptance.test.ts`: the full 26-step acceptance scenario, from QR to commission in the admin dashboard
+- `reliability.test.ts`: cart-aware ETA, deadlines, action replay, concurrent promo retries, tenant identity and safe payment links
+- `cart-offline.test.ts`: damaged storage, unavailable selections and shared-terminal cache isolation
+- `restaurant-identity.test.ts`: isolated branding, stable redirects and independent QR round-trip decoding
+
+Browser checks run against a **local, seeded demo database** and create demo orders:
+
+```bash
+npx playwright install chromium
+E2E_BASE_URL=http://localhost:3000 E2E_ADMIN_EMAIL=admin@example.com E2E_ADMIN_PASSWORD='your-local-seed-password' npm run test:e2e
+# If Chrome is installed, add PLAYWRIGHT_CHANNEL=chrome instead of installing Chromium.
+```
+
+The three browser scenarios cover customized cash checkout and every fulfilment step, manual InstaPay review, and QR/poster downloads decoded independently with jsQR. Menu, checkout and tracking also receive automated WCAG 2 A/AA checks; these do not replace testing with real people and assistive technologies.
+
+A separate real PostgreSQL verification uses 12 connections, creates unique temporary fixtures, exercises concurrent checkout/action/promotion/ETA/sync cases, then removes those fixtures. It refuses remote or production databases:
+
+```bash
+npm run test:postgres
+```
+
+Observed local validation: 24 same-key requests created one order, 24 final-promo retries consumed one allowance, 12 action retries applied once, and concurrent traffic yielded 80 unique, gap-free events. This is a short burst test, not a sustained load or network-failure benchmark.
+
+`npm audit --omit=dev` reports no production advisories. The development migration tool chain retains four moderate entries originating from one legacy esbuild advisory; do not apply npm's suggested Drizzle Kit downgrade blindly.
 
 ## 12. Growing later (designed for, not built)
 
