@@ -74,6 +74,22 @@ export async function ensureUser(d: Db, opts: { email: string; name: string; pas
   return created;
 }
 
+/**
+ * Creates the first platform owner from deploy-time variables. Does nothing once any SUPER_ADMIN
+ * exists, never changes an existing password, and refuses weak passwords.
+ */
+export async function bootstrapSuperAdmin(d: Db, opts: { email: string; password: string; name?: string }): Promise<'created' | 'exists'> {
+  const superAdmin = await roleId(d, 'SUPER_ADMIN');
+  const [existing] = await d.select({ id: userRoles.id }).from(userRoles).where(eq(userRoles.roleId, superAdmin)).limit(1);
+  if (existing) return 'exists';
+  const email = opts.email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('BOOTSTRAP_ADMIN_EMAIL is not a valid email address');
+  if (opts.password.length < 12) throw new Error('BOOTSTRAP_ADMIN_PASSWORD must be at least 12 characters');
+  const user = await ensureUser(d, { email, name: opts.name || 'Platform Owner', password: opts.password });
+  await assignRole(d, user.id, 'SUPER_ADMIN', null);
+  return 'created';
+}
+
 export async function assignRole(d: Db, userId: string, roleKey: string, restaurantId: string | null) {
   const rid = await roleId(d, roleKey);
   const where = restaurantId
