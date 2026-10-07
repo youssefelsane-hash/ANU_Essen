@@ -11,7 +11,8 @@ import type { OrderSnapshot } from '@/lib/types';
 export function Receipt({ order, restaurantName, timezone }: { order: OrderSnapshot; restaurantName: string; timezone: string }) {
   const { locale, t } = useLanguage();
   const copy = labels(locale);
-  const paid = order.paymentStatus === 'PAYMENT_VERIFIED';
+  const paid = ['PAYMENT_VERIFIED', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(order.paymentStatus);
+  const refunded = order.refundedTotal ?? 0;
   return (
     <div className="receipt" style={{ direction: locale === 'ar' ? 'rtl' : 'ltr' }}>
       <h1>{restaurantName}</h1>
@@ -41,6 +42,7 @@ export function Receipt({ order, restaurantName, timezone }: { order: OrderSnaps
       {order.discountTotal > 0 && <div className="row"><span>{t('الخصم', 'Discount')}</span><span>-{formatMoney(order.discountTotal, locale)}</span></div>}
       {order.deliveryFee > 0 && <div className="row"><span>{t('التوصيل', 'Delivery')}</span><span>{formatMoney(order.deliveryFee, locale)}</span></div>}
       <div className="row" style={{ fontWeight: 800, fontSize: '14px' }}><span>{t('الإجمالي', 'Total')}</span><span>{formatMoney(order.total, locale)}</span></div>
+      {refunded > 0 && <div className="row"><span>{t('مسترد للعميل', 'Refunded')}</span><span>-{formatMoney(refunded, locale)}</span></div>}
       <hr />
       <div>
         {t('الدفع', 'Payment')}: {copy.paymentMethod[order.paymentMethod]} —{' '}

@@ -13,6 +13,8 @@ import { audit } from '../services/audit';
 import { optStr, requestMeta, runAction, str } from './util';
 import type { ActionState } from '../../lib/action-state';
 import { parseMoney } from '../../lib/domain/misc';
+import { platformProfileSchema } from '../../lib/domain/platform-profile';
+import { getPlatformProfile, PLATFORM_PROFILE_KEY } from '../platform-profile';
 
 const actor = (auth: AuthContext) => ({ type: 'USER' as const, userId: auth.user.id, label: auth.user.name });
 
@@ -191,6 +193,34 @@ export async function saveSettingsAction(_prev: ActionState, fd: FormData): Prom
       ...(await requestMeta()),
     });
     revalidatePath('/admin/settings');
+    return 'Settings saved';
+  });
+}
+
+const PROFILE_FIELD_AR: Record<string, string> = {
+  nameAr: 'اسم المنصة بالعربي', nameEn: 'اسم المنصة بالإنجليزي', descriptionAr: 'الوصف بالعربي', descriptionEn: 'الوصف بالإنجليزي',
+  companyAr: 'اسم الشركة بالعربي', companyEn: 'اسم الشركة بالإنجليزي', whatsapp: 'رقم واتساب', email: 'البريد الإلكتروني',
+  facebookUrl: 'فيسبوك (يبدأ بـ https://)', instagramUrl: 'إنستجرام (يبدأ بـ https://)', tiktokUrl: 'تيك توك (يبدأ بـ https://)',
+  addressAr: 'العنوان', commercialRegister: 'السجل التجاري', taxId: 'الرقم الضريبي', orderAheadAr: 'جملة الطلب المسبق بالعربي', orderAheadEn: 'جملة الطلب المسبق بالإنجليزي',
+};
+
+/** Public platform identity: footer, legal pages, contact links and the "order ahead" line. */
+export async function savePlatformProfileAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  return runAction(async () => {
+    const auth = await requirePermission('platform.settings');
+    const fields = Object.keys(platformProfileSchema.shape) as (keyof typeof platformProfileSchema.shape)[];
+    const parsed = platformProfileSchema.safeParse(Object.fromEntries(fields.map((k) => [k, str(fd, k)])));
+    if (!parsed.success) {
+      const field = String(parsed.error.issues[0]?.path[0] ?? '');
+      throw new AppError('VALIDATION', `راجع خانة «${PROFILE_FIELD_AR[field] ?? field}»`);
+    }
+    const before = await getPlatformProfile();
+    await db()
+      .insert(systemSettings)
+      .values({ key: PLATFORM_PROFILE_KEY, value: parsed.data, updatedByUserId: auth.user.id })
+      .onConflictDoUpdate({ target: systemSettings.key, set: { value: parsed.data, updatedAt: new Date(), updatedByUserId: auth.user.id } });
+    await audit({ actor: actor(auth), action: 'settings.platform_profile', entity: 'system_settings', entityId: null, before, after: parsed.data, ...(await requestMeta()) });
+    revalidatePath('/', 'layout');
     return 'Settings saved';
   });
 }

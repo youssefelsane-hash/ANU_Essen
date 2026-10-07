@@ -6,6 +6,8 @@ import { getLocale } from '@/lib/i18n/server';
 import { text } from '@/lib/i18n';
 import { MerchantNavigation, MerchantSuspensionNotice } from '@/components/merchant/navigation';
 import { SafeSignOutForm } from '@/components/safe-sign-out';
+import { db } from '@/server/db';
+import { openRefundRequestCount } from '@/server/services/refunds';
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale('staff');
@@ -32,11 +34,13 @@ export default async function MerchantLayout({ children }: { children: React.Rea
       </main>
     );
   }
+  const refundRequests = permissions.has('payments.refund') ? await openRefundRequestCount(db(), restaurant.id) : 0;
   const links = [
     { href: '/merchant', ar: 'الطلبات', en: 'Orders', show: permissions.has('orders.view') || permissions.has('orders.delivery') },
     { href: '/merchant/new-order', ar: 'طلب من الكاشير', en: 'Counter order', show: permissions.has('orders.create') },
     { href: '/merchant/dashboard', ar: 'ملخص اليوم', en: 'Today', show: permissions.has('reports.view') },
     { href: '/merchant/menu', ar: 'الأصناف والأسعار', en: 'Menu & prices', show: permissions.has('menu.availability') || permissions.has('menu.manage') },
+    { href: '/merchant/refunds', ar: 'الاسترداد', en: 'Refunds', show: permissions.has('payments.refund'), count: refundRequests },
     { href: '/merchant/staff', ar: 'الفريق', en: 'Team', show: permissions.has('staff.manage') },
   ];
   return (

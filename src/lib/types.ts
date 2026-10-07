@@ -26,6 +26,23 @@ export interface TimelineEntry {
   note?: string | null;
 }
 
+export type RefundStatus = 'REQUESTED' | 'COMPLETED' | 'REJECTED';
+
+export interface RefundView {
+  id: string;
+  status: RefundStatus;
+  amount: number;
+  method: PaymentMethod | null;
+  reason: string | null;
+  /** Where the customer wants the money (InstaPay address / wallet). Staff only. */
+  payoutDetails?: string | null;
+  reference: string | null;
+  decisionNote: string | null;
+  requestedByCustomer: boolean;
+  createdAt: number;
+  decidedAt: number | null;
+}
+
 /** Everything a merchant device needs to run an order fully offline (also used for receipts). */
 export interface OrderSnapshot {
   id: string;
@@ -66,6 +83,9 @@ export interface OrderSnapshot {
   assignedToUserId: string | null;
   assignedToName: string | null;
   timeline: TimelineEntry[];
+  /** Optional: snapshots cached on devices before refunds existed lack these. */
+  refundedTotal?: number;
+  refunds?: RefundView[];
   version: number;
 }
 
@@ -139,6 +159,10 @@ export interface TrackingView {
     cancelledAt: number | null;
     cancelReason: string | null;
     paymentDeadlineAt: number | null;
+    refundedTotal: number;
+    refunds: RefundView[];
+    /** The customer can still ask for a refund (finished order, paid, inside the window, none open). */
+    canRequestRefund: boolean;
   };
   restaurant: { nameAr: string; nameEn: string; phone: string | null; slug: string; timezone: string };
   instapay: { accountName: string | null; address: string | null; phone: string | null; link: string | null; instructions: string | null; instructionsEn?: string | null } | null;

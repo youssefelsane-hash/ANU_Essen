@@ -7,12 +7,14 @@ import {
   orders,
   paymentAttachments,
   payments,
+  refunds,
   restaurantPaymentMethods,
   restaurants,
   users,
 } from '../db/schema';
-import type { OrderSnapshot, SnapshotItem, TimelineEntry, TrackingView } from '../../lib/types';
+import type { OrderSnapshot, RefundView, SnapshotItem, TimelineEntry, TrackingView } from '../../lib/types';
 import { expireUnpaidOrder } from './order-actions';
+import { canCustomerRequestRefund } from './refunds';
 
 const ms = (d: Date | null | undefined) => (d ? d.getTime() : null);
 
@@ -53,6 +55,29 @@ async function loadItems(d: Db, orderIds: string[]): Promise<Map<string, Snapsho
   return byOrder;
 }
 
+async function loadRefunds(d: Db, orderIds: string[], withPayout: boolean): Promise<Map<string, RefundView[]>> {
+  const rows = orderIds.length ? await d.select().from(refunds).where(inArray(refunds.orderId, orderIds)).orderBy(asc(refunds.createdAt)) : [];
+  const byOrder = new Map<string, RefundView[]>();
+  for (const r of rows) {
+    const list = byOrder.get(r.orderId) ?? [];
+    list.push({
+      id: r.id,
+      status: r.status,
+      amount: r.amount,
+      method: r.method,
+      reason: r.reason,
+      ...(withPayout ? { payoutDetails: r.payoutDetails } : {}),
+      reference: r.reference,
+      decisionNote: r.decisionNote,
+      requestedByCustomer: r.requestedByCustomer,
+      createdAt: r.createdAt.getTime(),
+      decidedAt: ms(r.decidedAt),
+    });
+    byOrder.set(r.orderId, list);
+  }
+  return byOrder;
+}
+
 export interface SnapshotOptions {
   includePhone: boolean;
 }
@@ -61,7 +86,7 @@ export interface SnapshotOptions {
 export async function loadOrderSnapshots(d: Db, orderIds: string[], opts: SnapshotOptions): Promise<OrderSnapshot[]> {
   const ids = [...new Set(orderIds)];
   if (!ids.length) return [];
-  const [orderRows, itemsByOrder, eventRows, paymentRows] = await Promise.all([
+  const [orderRows, itemsByOrder, eventRows, paymentRows, refundsByOrder] = await Promise.all([
     d.select().from(orders).where(inArray(orders.id, ids)),
     loadItems(d, ids),
     d
@@ -79,6 +104,7 @@ export async function loadOrderSnapshots(d: Db, orderIds: string[], opts: Snapsh
       .where(inArray(orderEvents.orderId, ids))
       .orderBy(asc(orderEvents.seq)),
     d.select().from(payments).where(inArray(payments.orderId, ids)),
+    loadRefunds(d, ids, opts.includePhone),
   ]);
   const paymentIds = paymentRows.map((p) => p.id);
   const attachmentRows = paymentIds.length
@@ -141,6 +167,8 @@ export async function loadOrderSnapshots(d: Db, orderIds: string[], opts: Snapsh
       assignedToUserId: o.assignedToUserId,
       assignedToName: o.assignedToUserId ? (names.get(o.assignedToUserId) ?? null) : null,
       timeline,
+      refundedTotal: o.refundedTotal,
+      refunds: refundsByOrder.get(o.id) ?? [],
       version: o.version,
     };
   });
@@ -154,11 +182,13 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
     [o] = await d.select().from(orders).where(eq(orders.trackingToken, token));
     if (!o) return null;
   }
-  const [[r], itemsByOrder, [payment]] = await Promise.all([
+  const [[r], itemsByOrder, [payment], refundsByOrder] = await Promise.all([
     d.select().from(restaurants).where(eq(restaurants.id, o.restaurantId)),
     loadItems(d, [o.id]),
     d.select().from(payments).where(eq(payments.orderId, o.id)),
+    loadRefunds(d, [o.id], false),
   ]);
+  const orderRefunds = refundsByOrder.get(o.id) ?? [];
   if (!r) return null;
   let instapay: TrackingView['instapay'] = null;
   if (o.paymentMethod === 'INSTAPAY') {
@@ -207,6 +237,9 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
       cancelledAt: ms(o.cancelledAt),
       cancelReason: o.cancelReason,
       paymentDeadlineAt: o.status === 'AWAITING_PAYMENT' && r.unpaidTimeoutMinutes > 0 ? o.updatedAt.getTime() + r.unpaidTimeoutMinutes * 60_000 : null,
+      refundedTotal: o.refundedTotal,
+      refunds: orderRefunds,
+      canRequestRefund: canCustomerRequestRefund(o) && !orderRefunds.some((x) => x.status === 'REQUESTED'),
     },
     restaurant: { nameAr: r.nameAr, nameEn: r.nameEn, phone: r.phone, slug: r.slug, timezone: r.timezone },
     instapay,

@@ -28,6 +28,7 @@ export const PAYMENT_STATUSES = [
   'PAYMENT_REJECTED',
   'CASH',
   'REFUNDED',
+  'PARTIALLY_REFUNDED',
 ] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 

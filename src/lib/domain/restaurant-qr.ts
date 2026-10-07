@@ -29,6 +29,15 @@ export function buildRestaurantQrUrl(baseUrl: string, restaurantId: string, sour
   return url.toString();
 }
 
+/** The platform's own QR opens the page that lists every restaurant (poster label kept for attribution). */
+export function buildPlatformQrUrl(baseUrl: string, source = ''): string {
+  const poster = source.trim();
+  if (poster && !/^[a-zA-Z0-9_-]{1,64}$/.test(poster)) throw new Error('Poster label: use up to 64 letters, numbers, dashes or underscores.');
+  const url = new URL('/', publicOrigin(baseUrl));
+  if (poster) url.searchParams.set('utm_source', poster);
+  return url.toString();
+}
+
 export function isLocalQrOrigin(baseUrl: string): boolean {
   try {
     const hostname = new URL(baseUrl).hostname;

@@ -33,6 +33,7 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
         restaurantName={localizedName(locale, r?.nameAr, r?.nameEn)}
         timezone={r?.timezone ?? 'Africa/Cairo'}
         canPrint
+        canRefund={auth.platformPermissions.has('payments.refund')}
         commission={auth.platformPermissions.has('platform.finance') ? { bps: row.commissionBps, amount: row.commissionAmount, merchantNet: row.merchantNet, source: row.source } : null}
       />
     </div>

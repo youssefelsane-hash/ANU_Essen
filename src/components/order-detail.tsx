@@ -2,6 +2,7 @@ import { formatDateTime, formatMoney } from '@/lib/domain/misc';
 import { PAYMENT_STATUS_TONE, STATUS_TONE } from '@/lib/labels';
 import type { OrderSnapshot } from '@/lib/types';
 import { PrintButton } from './merchant/receipt';
+import { RefundPanel } from './refund-panel';
 import { labels, localizedName, text } from '@/lib/i18n';
 import { getLocale } from '@/lib/i18n/server';
 
@@ -12,12 +13,14 @@ export async function OrderDetail({
   timezone,
   commission,
   canPrint,
+  canRefund = false,
 }: {
   order: OrderSnapshot;
   restaurantName: string;
   timezone: string;
   commission?: { bps: number; amount: number; merchantNet: number; source: string | null } | null;
   canPrint: boolean;
+  canRefund?: boolean;
 }) {
   const locale = await getLocale('staff');
   const t = (ar: string, en: string) => text(locale, ar, en);
@@ -59,6 +62,7 @@ export async function OrderDetail({
           {o.discountTotal > 0 && <div className="flex justify-between text-green-700"><span>{t('الخصم', 'Discount')} {o.promoCode ? `(${o.promoCode})` : ''}</span><span>-{money(o.discountTotal)}</span></div>}
           {o.deliveryFee > 0 && <div className="flex justify-between"><span>{t('التوصيل', 'Delivery')}</span><span>{money(o.deliveryFee)}</span></div>}
           <div className="flex justify-between text-base font-extrabold"><span>{t('الإجمالي', 'Total')}</span><span>{money(o.total)}</span></div>
+          {(o.refundedTotal ?? 0) > 0 && <div className="flex justify-between font-semibold text-amber-800"><span>{t('مسترد للعميل', 'Refunded')}</span><span>-{money(o.refundedTotal ?? 0)}</span></div>}
           {commission && (
             <div className="mt-2 rounded-lg bg-indigo-50 p-2 text-xs text-indigo-900">
               {t('عمولة المنصة', 'Platform commission')} {(commission.bps / 100).toFixed(2)}% = {money(commission.amount)} • {t('صافي المطعم', 'Restaurant net')} {money(commission.merchantNet)}
@@ -71,6 +75,8 @@ export async function OrderDetail({
         {o.cancelReason && <p className="text-sm text-red-700">{t('سبب الإلغاء', 'Cancellation reason')}: {o.cancelReason}</p>}
         {canPrint && <PrintButton order={o} restaurantName={restaurantName} timezone={timezone} />}
       </section>
+      <div className="space-y-4">
+      <RefundPanel order={o} timezone={timezone} canRefund={canRefund} />
       <section className="card">
         <h2 className="mb-3 font-bold">{t('مراحل الطلب', 'Order history')}</h2>
         <ol className="space-y-3 border-s-2 border-gray-200 ps-4">
@@ -78,7 +84,7 @@ export async function OrderDetail({
             <li key={i} className="text-sm">
               <div className="text-xs text-gray-500">{formatDateTime(e.occurredAt, timezone, locale)}</div>
               <div className="font-semibold">
-                {e.type === 'ORDER_CREATED' ? t('تم إنشاء الطلب', 'Order placed') : e.type === 'DELIVERY_REASSIGNED' ? t('تم تغيير مسؤول التوصيل', 'Courier changed') : e.action ? l.action[e.action as keyof typeof l.action] ?? t('تم تحديث الطلب', 'Order updated') : t('تم تحديث الطلب', 'Order updated')}
+                {e.type === 'ORDER_CREATED' ? t('تم إنشاء الطلب', 'Order placed') : e.type === 'REFUNDED' ? t('تم استرداد مبلغ للعميل', 'Money refunded') : e.type === 'REFUND_REQUESTED' ? t('العميل طلب استرجاع', 'Customer asked for a refund') : e.type === 'REFUND_REJECTED' ? t('تم رفض طلب الاسترجاع', 'Refund request declined') : e.type === 'DELIVERY_REASSIGNED' ? t('تم تغيير مسؤول التوصيل', 'Courier changed') : e.action ? l.action[e.action as keyof typeof l.action] ?? t('تم تحديث الطلب', 'Order updated') : t('تم تحديث الطلب', 'Order updated')}
                 {e.toStatus && <span className="text-gray-500"> → {l.status[e.toStatus]}</span>}
               </div>
               <div className="text-xs text-gray-500">{e.actor === 'customer' ? t('العميل', 'Customer') : e.actor === 'system' ? t('النظام', 'System') : e.actor === 'staff' ? t('فريق المطعم', 'Restaurant team') : e.actor}{e.note ? ` — ${e.note}` : ''}</div>
@@ -86,6 +92,7 @@ export async function OrderDetail({
           ))}
         </ol>
       </section>
+      </div>
     </div>
   );
 }

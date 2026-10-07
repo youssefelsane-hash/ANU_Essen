@@ -4,17 +4,11 @@ import { orders } from '@/server/db/schema';
 import { AppError } from '@/server/errors';
 import { json, readJson, route } from '@/server/http';
 import { enforceRateLimit } from '@/server/rate-limit';
+import { looksLikeImage } from '@/server/images';
 import { applyOrderAction, expireUnpaidOrder } from '@/server/services/order-actions';
 import { MAX_SCREENSHOT_BYTES, submitPaymentSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
-
-function looksLikeImage(buf: Buffer, type: string): boolean {
-  if (type === 'image/jpeg') return buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
-  if (type === 'image/png') return buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  if (type === 'image/webp') return buf.subarray(0, 4).toString('ascii') === 'RIFF' && buf.subarray(8, 12).toString('ascii') === 'WEBP';
-  return false;
-}
 
 /** Customer pressed "تم التحويل": InstaPay transfer reported (reference + screenshot are optional). */
 export const POST = route<{ params: Promise<{ token: string }> }>(async (req, { params }, meta) => {

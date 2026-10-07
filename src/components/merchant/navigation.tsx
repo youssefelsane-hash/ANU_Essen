@@ -11,7 +11,7 @@ import type { MerchantStoreRef } from '@/server/merchant-context';
 interface Props {
   restaurant: MerchantStoreRef;
   restaurants: MerchantStoreRef[];
-  links: { href: string; ar: string; en: string }[];
+  links: { href: string; ar: string; en: string; count?: number }[];
   userName: string;
   isPlatform: boolean;
 }
@@ -43,7 +43,7 @@ export function MerchantNavigation({ restaurant, restaurants, links, userName, i
         </details>
       </div>
       <div className="no-scrollbar flex items-center gap-1 overflow-x-auto">
-        {links.map((link) => <Link key={link.href} href={link.href} className="min-h-10 shrink-0 rounded-lg px-3 py-2.5 font-semibold hover:bg-white/10">{t(link.ar, link.en)}</Link>)}
+        {links.map((link) => <Link key={link.href} href={link.href} className="min-h-10 shrink-0 rounded-lg px-3 py-2.5 font-semibold hover:bg-white/10">{t(link.ar, link.en)}{link.count ? <span className="ms-1.5 rounded-full bg-amber-400 px-1.5 py-0.5 text-xs font-black text-gray-900" aria-label={t(`${link.count} طلب مستني`, `${link.count} waiting`)}>{link.count}</span> : null}</Link>)}
       </div>
     </nav>
   );

@@ -5,7 +5,7 @@ import { useLanguage } from '@/components/language-provider';
 import { LanguageSwitcher } from '@/components/language-switcher';
 import { labels, localizedName } from '@/lib/i18n';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Check, Clock3, MapPin, Minus, Plus, RotateCcw, Search, ShoppingBag, UtensilsCrossed, X } from 'lucide-react';
+import { AlarmClock, ArrowLeft, Check, Clock3, MapPin, Minus, Plus, RotateCcw, Search, ShoppingBag, UtensilsCrossed, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { estimateLine, useCart } from '@/client/cart';
 import { lastOrderFor, MY_ORDERS_KEY, readJson, writeJson, type SavedOrder } from '@/client/storage';
@@ -16,7 +16,7 @@ import './customer.css';
 
 const searchable = (value: string) => value.toLowerCase().normalize('NFKD').replace(/[\u064B-\u065F]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي');
 
-export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
+export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu; orderAhead?: { ar: string; en: string } }) {
   const { locale, t } = useLanguage();
   const [menu, setMenu] = useState(initialMenu);
   const slug = menu.restaurant.slug;
@@ -145,6 +145,8 @@ export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
             <div><span className="service-icon"><Clock3 size={20} /></span><span><small>{t("وقت الوصول المتوقع", "Estimated arrival")}</small><strong>{accepting ? menu.store.etaMinutes + t(" دقيقة تقريبًا", " minutes, approximately") : t("الطلب غير متاح حاليًا", "Ordering is currently unavailable")}</strong></span></div>
             <div><span className="service-icon"><MapPin size={20} /></span><span><small>{t("نقطة الاستلام", "Pickup point")}</small><strong>{localizedName(locale, defaultPoint?.nameAr, defaultPoint?.nameEn) || t("تتحدد عند الطلب", "Choose at checkout")}</strong></span></div>
           </div>
+
+          {accepting && orderAhead && t(orderAhead.ar, orderAhead.en) && <p className="order-ahead mt-4"><AlarmClock size={22} aria-hidden="true" />{t(orderAhead.ar, orderAhead.en)}</p>}
 
           {!accepting && (
             <div className="customer-alert" role="status">

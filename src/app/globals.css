@@ -74,7 +74,10 @@ html[lang='ar'] .admin-brand small, html[lang='ar'] .admin-nav-label, html[lang=
 .login-intro:after { content: ''; position: absolute; width: 500px; height: 500px; border: 1px solid #e4c88826; border-radius: 50%; bottom: -320px; right: -100px; box-shadow: 0 0 0 70px #e4c88807, 0 0 0 140px #e4c88805; }
 .login-panel { display: flex; align-items: center; justify-content: center; padding: 48px 24px; }
 .login-panel-inner { width: 100%; max-width: 380px; }
-.directory { max-width: 1050px; margin: auto; padding: 32px 24px 80px; }
+.directory { max-width: 1050px; margin: auto; padding: 32px 24px 24px; }
+.order-ahead { display: flex; align-items: center; gap: 12px; border: 1px solid #d9e3d3; background: #eef4ea; color: #1d3b2d; border-radius: 16px; padding: 14px 18px; font-size: 15px; font-weight: 600; line-height: 1.7; }
+.order-ahead svg { flex-shrink: 0; color: #234d3b; }
+@media (max-width: 850px) { .site-footer.with-cart-bar { padding-bottom: 96px; } }
 .directory-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 24px; border-bottom: 1px solid #dddace; }
 .directory-title { padding: 64px 0 44px; }
 .directory-title h1 { font-size: clamp(32px, 5vw, 52px); line-height: 1.4; font-weight: 600; margin: 10px 0; }

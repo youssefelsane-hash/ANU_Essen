@@ -20,6 +20,8 @@ const NAV = [
   { href: '/admin', ar: 'نظرة عامة', en: 'Overview', permission: 'platform.finance', icon: 'LayoutDashboard', primary: true },
   { href: '/admin/restaurants', ar: 'المطاعم', en: 'Restaurants', permission: 'platform.restaurants', icon: 'Store', primary: true },
   { href: '/admin/orders', ar: 'الطلبات', en: 'Orders', permission: 'platform.restaurants', icon: 'ReceiptText', primary: true },
+  { href: '/admin/refunds', ar: 'الاسترداد', en: 'Refunds', permission: 'platform.restaurants', icon: 'RotateCcw', primary: true },
+  { href: '/admin/qr', ar: 'QR المنصة', en: 'Platform QR', permission: 'platform.restaurants', icon: 'QrCode', primary: true },
   { href: '/admin/finance', ar: 'العمولات والتحصيل', en: 'Finance', permission: 'platform.finance', icon: 'Wallet', primary: true },
   { href: '/admin/customers', ar: 'العملاء', en: 'Customers', permission: 'platform.restaurants', icon: 'Users', primary: false },
   { href: '/admin/users', ar: 'المستخدمون والفريق', en: 'Team members', permission: 'platform.users', icon: 'UserCog', primary: false },

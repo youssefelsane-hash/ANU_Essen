@@ -12,6 +12,7 @@ const CUSTOMER_MESSAGES: [string, string][] = [
   ['النت ضعيف — حاول تاني', 'The connection is unstable. Please try again.'],
   ['تعذّر إلغاء الطلب. جرّب تاني.', "We couldn't cancel the order. Please try again."],
   ['الرد موصلناش بسبب الاتصال. بنراجع حالة الطلب؛ ممكن الإلغاء يكون تم.', 'The connection dropped before a reply. Checking your order; it may already be cancelled.'],
+  ['تعذّر إرسال الطلب. جرّب تاني.', "We couldn't send the request. Please try again."],
 ];
 
 export function customerMessage(message: string, locale: Locale): string {

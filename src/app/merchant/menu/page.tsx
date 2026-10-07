@@ -8,6 +8,7 @@ import { formatMoney } from '@/lib/domain/misc';
 import { getLocale } from '@/lib/i18n/server';
 import { text, localizedName, type Locale } from '@/lib/i18n';
 import { AvailabilityToggle } from '@/components/merchant/availability-toggle';
+import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +40,10 @@ export default async function MerchantMenuPage() {
 
   return (
     <main className="mx-auto max-w-4xl space-y-5 p-4">
-      <h1 className="text-2xl font-extrabold">{t('الأصناف والأسعار', 'Menu & prices')}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-extrabold">{t('الأصناف والأسعار', 'Menu & prices')}</h1>
+        {canPrice && <Link href="/merchant/menu/manage" className="btn btn-primary btn-sm">{t('تعديل المنيو: أقسام وأصناف وصور', 'Edit menu: categories, products & photos')}</Link>}
+      </div>
       <p className="text-sm text-gray-500">{t('اضغط على حالة الصنف لإتاحته أو إيقافه. العملاء لا يمكنهم طلب الأصناف غير المتاحة.', 'Tap an item’s availability to turn it on or off. Customers cannot order unavailable items.')}</p>
       {cats.map((c) => (
         <section key={c.id} className="card">

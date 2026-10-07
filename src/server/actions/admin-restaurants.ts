@@ -254,6 +254,13 @@ export async function updateQueueConfigAction(_prev: ActionState, fd: FormData):
 
 // ---------------------------------------------------------------- menu
 
+/** The menu is edited from the platform admin and from the restaurant's own screens. */
+function revalidateMenu(restaurantId: string) {
+  revalidatePath(`/admin/restaurants/${restaurantId}/menu`);
+  revalidatePath('/merchant/menu');
+  revalidatePath('/merchant/menu/manage');
+}
+
 export async function saveCategoryAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
   return runAction(async () => {
     const restaurantId = uuid(str(fd, 'restaurantId'));
@@ -269,7 +276,7 @@ export async function saveCategoryAction(_prev: ActionState, fd: FormData): Prom
     if (id) await db().update(categories).set(values).where(and(eq(categories.id, uuid(id)), eq(categories.restaurantId, restaurantId)));
     else await db().insert(categories).values({ ...values, restaurantId });
     await audit({ actor: actor(auth), action: id ? 'menu.category_updated' : 'menu.category_created', entity: 'category', entityId: id || null, restaurantId, after: values });
-    revalidatePath(`/admin/restaurants/${restaurantId}/menu`);
+    revalidateMenu(restaurantId);
     return 'Category saved';
   });
 }
@@ -371,10 +378,10 @@ export async function saveProductAction(_prev: ActionState, fd: FormData): Promi
       ...(await requestMeta()),
     });
     if (!before) createdId = productId;
-    revalidatePath(`/admin/restaurants/${restaurantId}/menu`);
+    revalidateMenu(restaurantId);
     return 'Product saved';
   });
-  if (res.ok && createdId) redirect(`/admin/restaurants/${restaurantId}/menu/products/${createdId}`);
+  if (res.ok && createdId) redirect(str(fd, 'surface') === 'merchant' ? `/merchant/menu/manage/products/${createdId}` : `/admin/restaurants/${restaurantId}/menu/products/${createdId}`);
   return res;
 }
 
@@ -423,7 +430,7 @@ export async function saveAddonGroupAction(_prev: ActionState, fd: FormData): Pr
       if (removed.length) await tx.delete(addons).where(inArray(addons.id, removed));
     });
     await audit({ actor: actor(auth), action: id ? 'menu.addon_group_updated' : 'menu.addon_group_created', entity: 'addon_group', entityId: id || null, restaurantId, after: { ...values, addons: rows } });
-    revalidatePath(`/admin/restaurants/${restaurantId}/menu`);
+    revalidateMenu(restaurantId);
     return 'Addon group saved';
   });
 }
@@ -523,5 +530,5 @@ export async function setProductActiveAction(productId: string, active: boolean)
   const auth = await requirePermission('menu.manage', p.restaurantId);
   await db().update(products).set({ isActive: active, updatedAt: new Date(), version: p.version + 1 }).where(eq(products.id, pid));
   await audit({ actor: actor(auth), action: active ? 'menu.product_restored' : 'menu.product_archived', entity: 'product', entityId: pid, restaurantId: p.restaurantId, before: { isActive: p.isActive }, after: { isActive: active } });
-  revalidatePath(`/admin/restaurants/${p.restaurantId}/menu`);
+  revalidateMenu(p.restaurantId);
 }
