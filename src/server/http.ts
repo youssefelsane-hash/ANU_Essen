@@ -1,0 +1,84 @@
+import { ZodError } from 'zod';
+import { AppError } from './errors';
+import { log, reportError } from './log';
+import { PricingError } from '../lib/domain/pricing';
+
+export interface RequestMeta {
+  requestId: string;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export function clientIp(req: Request): string | null {
+  const fwd = req.headers.get('x-forwarded-for');
+  if (fwd) return fwd.split(',')[0]!.trim();
+  return req.headers.get('x-real-ip');
+}
+
+export function json(data: unknown, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set('cache-control', 'no-store');
+  return Response.json(data, { ...init, headers });
+}
+
+export function errorResponse(err: unknown, requestId: string): Response {
+  if (err instanceof AppError) {
+    return json({ error: { code: err.code, message: err.message, details: err.details, requestId } }, { status: err.status });
+  }
+  if (err instanceof PricingError) {
+    return json({ error: { code: 'PRICING', message: err.message, details: { reason: err.code, ...err.meta }, requestId } }, { status: 422 });
+  }
+  if (err instanceof ZodError) {
+    return json(
+      { error: { code: 'VALIDATION', message: 'بيانات غير صحيحة', details: { issues: err.issues.slice(0, 10) }, requestId } },
+      { status: 400 },
+    );
+  }
+  reportError(err, { requestId });
+  return json({ error: { code: 'INTERNAL', message: 'حصل خطأ غير متوقع، حاول تاني', requestId } }, { status: 500 });
+}
+
+/** Route wrapper: request id, structured access log, uniform error mapping. */
+export function route<Ctx>(handler: (req: Request, ctx: Ctx, meta: RequestMeta) => Promise<Response>) {
+  return async (req: Request, ctx: Ctx): Promise<Response> => {
+    const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID();
+    const started = Date.now();
+    let res: Response;
+    try {
+      res = await handler(req, ctx, { requestId, ip: clientIp(req), userAgent: req.headers.get('user-agent') });
+    } catch (err) {
+      res = errorResponse(err, requestId);
+    }
+    res.headers.set('x-request-id', requestId);
+    const fields = { requestId, method: req.method, path: new URL(req.url).pathname, status: res.status, ms: Date.now() - started };
+    if (res.status >= 500) log.error('request', fields);
+    else if (req.method === 'GET' && res.status < 400) log.debug('request', fields);
+    else log.info('request', fields);
+    return res;
+  };
+}
+
+/** CSRF defence for cookie-authenticated mutations: the Origin must match the host. */
+export function assertSameOrigin(req: Request) {
+  const origin = req.headers.get('origin');
+  if (!origin) return; // non-browser clients (no ambient cookies are sent cross-site without Origin)
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host');
+  try {
+    if (new URL(origin).host !== host) throw new AppError('FORBIDDEN', 'Cross-origin request blocked');
+  } catch (e) {
+    if (e instanceof AppError) throw e;
+    throw new AppError('FORBIDDEN', 'Bad origin');
+  }
+}
+
+export async function readJson(req: Request, maxBytes = 1_000_000): Promise<unknown> {
+  const len = Number(req.headers.get('content-length') ?? 0);
+  if (len > maxBytes) throw new AppError('PAYLOAD_TOO_LARGE', 'Request too large');
+  const text = await req.text();
+  if (text.length > maxBytes) throw new AppError('PAYLOAD_TOO_LARGE', 'Request too large');
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw new AppError('VALIDATION', 'Invalid JSON');
+  }
+}

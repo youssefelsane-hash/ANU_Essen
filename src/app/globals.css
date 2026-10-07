@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", "Noto Sans", Tahoma, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body { background: #f6f5f3; color: #111827; }
+
+@layer components {
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition select-none active:scale-[.98] disabled:pointer-events-none disabled:opacity-50; }
+  .btn-primary { @apply bg-orange-600 text-white hover:bg-orange-700; }
+  .btn-dark { @apply bg-gray-900 text-white hover:bg-gray-800; }
+  .btn-success { @apply bg-green-600 text-white hover:bg-green-700; }
+  .btn-secondary { @apply bg-white text-gray-900 ring-1 ring-gray-300 hover:bg-gray-50; }
+  .btn-danger { @apply bg-red-600 text-white hover:bg-red-700; }
+  .btn-ghost { @apply text-gray-700 hover:bg-gray-100; }
+  .btn-sm { @apply rounded-lg px-3 py-1.5 text-xs; }
+  .btn-lg { @apply rounded-2xl px-5 py-4 text-base; }
+  .input { @apply w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200; }
+  .label { @apply mb-1 block text-xs font-semibold text-gray-600; }
+  .card { @apply rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-200; }
+  .badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap; }
+  .table { @apply w-full text-sm; }
+  .table th { @apply border-b border-gray-200 px-3 py-2 text-start text-xs font-semibold tracking-wide text-gray-500 uppercase; }
+  .table td { @apply border-b border-gray-100 px-3 py-2 align-top; }
+  .skeleton { @apply animate-pulse rounded-xl bg-gray-200; }
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* ---------- Thermal receipt printing (browser print dialog; 80mm default, 58mm optional) ---------- */
+#print-root { display: none; }
+@media print {
+  body > *:not(#print-root) { display: none !important; }
+  body { background: #fff !important; margin: 0; }
+  #print-root { display: block !important; }
+}
+.receipt { width: var(--receipt-width, 72mm); padding: 2mm 0; font-family: var(--font-mono); font-size: 12px; line-height: 1.35; color: #000; direction: rtl; }
+.receipt h1 { font-size: 16px; font-weight: 700; text-align: center; margin: 0 0 1mm; }
+.receipt .big { font-size: 20px; font-weight: 800; text-align: center; }
+.receipt .row { display: flex; justify-content: space-between; gap: 4px; }
+.receipt .muted { font-size: 11px; }
+.receipt hr { border: 0; border-top: 1px dashed #000; margin: 2mm 0; }
