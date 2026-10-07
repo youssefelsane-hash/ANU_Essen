@@ -29,6 +29,13 @@
       "when": 1791375898024,
       "tag": "0003_restaurant_suspension",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791377843659,
+      "tag": "0004_bilingual_content",
+      "breakpoints": true
     }
   ]
 }

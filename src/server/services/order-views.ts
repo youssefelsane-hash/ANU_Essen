@@ -40,11 +40,12 @@ async function loadItems(d: Db, orderIds: string[]): Promise<Map<string, Snapsho
       nameAr: i.productNameAr,
       nameEn: i.productNameEn,
       variantNameAr: i.variantNameAr,
+      variantNameEn: i.variantNameEn,
       quantity: i.quantity,
       unitPrice: i.unitPrice,
       addonsPerUnit: i.addonsPerUnit,
       lineTotal: i.lineTotal,
-      addons: addonRows.filter((a) => a.orderItemId === i.id).map((a) => ({ nameAr: a.nameAr, price: a.price })),
+      addons: addonRows.filter((a) => a.orderItemId === i.id).map((a) => ({ nameAr: a.nameAr, nameEn: a.nameEn, price: a.price })),
       note: i.note,
     });
     byOrder.set(i.orderId, list);
@@ -115,6 +116,7 @@ export async function loadOrderSnapshots(d: Db, orderIds: string[], opts: Snapsh
       customerPhone: opts.includePhone ? o.customerPhone : null,
       customerNote: o.customerNote,
       deliveryPointName: o.deliveryPointName,
+      deliveryPointNameEn: o.deliveryPointNameEn,
       items: itemsByOrder.get(o.id) ?? [],
       subtotal: o.subtotal,
       discountTotal: o.discountTotal,
@@ -169,6 +171,7 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
       phone: c.phone ?? null,
       link: safePaymentLink(c.link),
       instructions: c.instructions ?? null,
+      instructionsEn: c.instructionsEn ?? null,
     };
   }
   return {
@@ -183,6 +186,7 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
       paymentRejectedReason: payment?.rejectedReason ?? null,
       customerName: o.customerName,
       deliveryPointName: o.deliveryPointName,
+      deliveryPointNameEn: o.deliveryPointNameEn,
       items: itemsByOrder.get(o.id) ?? [],
       subtotal: o.subtotal,
       discountTotal: o.discountTotal,

@@ -2,6 +2,7 @@ import { ZodError } from 'zod';
 import { AppError } from './errors';
 import { log, reportError } from './log';
 import { PricingError } from '../lib/domain/pricing';
+import { errorMessage, languageScope, LANGUAGE_COOKIES, resolveLocale, type Locale } from '../lib/i18n';
 
 export interface RequestMeta {
   requestId: string;
@@ -21,21 +22,21 @@ export function json(data: unknown, init: ResponseInit = {}): Response {
   return Response.json(data, { ...init, headers });
 }
 
-export function errorResponse(err: unknown, requestId: string): Response {
+export function errorResponse(err: unknown, requestId: string, locale: Locale = 'ar'): Response {
   if (err instanceof AppError) {
-    return json({ error: { code: err.code, message: err.message, details: err.details, requestId } }, { status: err.status });
+    return json({ error: { code: err.code, message: errorMessage(err.code, locale, err.message), details: err.details, requestId } }, { status: err.status });
   }
   if (err instanceof PricingError) {
-    return json({ error: { code: 'PRICING', message: err.message, details: { reason: err.code, ...err.meta }, requestId } }, { status: 422 });
+    return json({ error: { code: 'PRICING', message: errorMessage('PRICING', locale, err.message), details: { reason: err.code, ...err.meta }, requestId } }, { status: 422 });
   }
   if (err instanceof ZodError) {
     return json(
-      { error: { code: 'VALIDATION', message: 'بيانات غير صحيحة', details: { issues: err.issues.slice(0, 10) }, requestId } },
+      { error: { code: 'VALIDATION', message: errorMessage('VALIDATION', locale), details: { fields: err.issues.slice(0, 10).map((issue) => issue.path.join('.')) }, requestId } },
       { status: 400 },
     );
   }
   reportError(err, { requestId });
-  return json({ error: { code: 'INTERNAL', message: 'حصل خطأ غير متوقع، حاول تاني', requestId } }, { status: 500 });
+  return json({ error: { code: 'INTERNAL', message: errorMessage('INTERNAL', locale), requestId } }, { status: 500 });
 }
 
 /** Route wrapper: request id, structured access log, uniform error mapping. */
@@ -47,7 +48,9 @@ export function route<Ctx>(handler: (req: Request, ctx: Ctx, meta: RequestMeta) 
     try {
       res = await handler(req, ctx, { requestId, ip: clientIp(req), userAgent: req.headers.get('user-agent') });
     } catch (err) {
-      res = errorResponse(err, requestId);
+      const scope = languageScope(new URL(req.url).pathname);
+      const pref = req.headers.get('cookie')?.split(';').map((cookie) => cookie.trim()).find((cookie) => cookie.startsWith(`${LANGUAGE_COOKIES[scope]}=`))?.split('=')[1];
+      res = errorResponse(err, requestId, resolveLocale(scope, pref, req.headers.get('accept-language')));
     }
     res.headers.set('x-request-id', requestId);
     const fields = { requestId, method: req.method, path: new URL(req.url).pathname, status: res.status, ms: Date.now() - started };

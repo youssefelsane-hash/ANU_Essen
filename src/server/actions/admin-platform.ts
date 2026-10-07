@@ -3,7 +3,7 @@
 import { eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { db } from '../db';
+import { db, isUniqueViolation, type Db } from '../db';
 import { permissions, rolePermissions, roles, sessions, settlements, systemSettings, userRoles, users } from '../db/schema';
 import { requirePermission } from '../auth/session';
 import type { AuthContext } from '../auth/authz';
@@ -38,16 +38,16 @@ export async function recordSettlementAction(_prev: ActionState, fd: FormData): 
 
 // ---------------------------------------------------------------- users & roles
 
-async function roleByKey(key: string) {
-  const [r] = await db().select().from(roles).where(eq(roles.key, key));
+async function roleByKey(key: string, executor: Db = db()) {
+  const [r] = await executor.select().from(roles).where(eq(roles.key, key));
   if (!r) throw new AppError('VALIDATION', 'Unknown role');
   return r;
 }
 
-async function assign(userId: string, roleKey: string, restaurantIdRaw: string | null) {
-  const role = await roleByKey(roleKey);
+async function assign(userId: string, roleKey: string, restaurantIdRaw: string | null, executor: Db = db()) {
+  const role = await roleByKey(roleKey, executor);
   const restaurantId = role.scope === 'STORE' ? z.uuid().parse(restaurantIdRaw ?? '') : null;
-  await db().insert(userRoles).values({ userId, roleId: role.id, restaurantId }).onConflictDoNothing();
+  await executor.insert(userRoles).values({ userId, roleId: role.id, restaurantId }).onConflictDoNothing();
   return { role: role.key, restaurantId };
 }
 
@@ -60,9 +60,20 @@ export async function createUserAction(_prev: ActionState, fd: FormData): Promis
     if (password.length < MIN_PASSWORD_LENGTH) throw new AppError('VALIDATION', `Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
     const [exists] = await db().select({ id: users.id }).from(users).where(eq(users.email, email));
     if (exists) throw new AppError('CONFLICT', 'A user with this email already exists');
-    const [user] = await db().insert(users).values({ email, name, phone: optStr(fd, 'phone'), passwordHash: await hashPassword(password) }).returning();
+    const passwordHash = await hashPassword(password);
     const roleKey = str(fd, 'roleKey');
-    const assigned = roleKey ? await assign(user.id, roleKey, optStr(fd, 'restaurantId')) : null;
+    let result;
+    try {
+      result = await db().transaction(async (tx) => {
+        const [user] = await tx.insert(users).values({ email, name, phone: optStr(fd, 'phone'), passwordHash }).returning();
+        const assigned = roleKey ? await assign(user.id, roleKey, optStr(fd, 'restaurantId'), tx) : null;
+        return { user, assigned };
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new AppError('CONFLICT', 'A user with this email already exists');
+      throw error;
+    }
+    const { user, assigned } = result;
     await audit({ actor: actor(auth), action: 'user.created', entity: 'user', entityId: user.id, restaurantId: assigned?.restaurantId ?? null, after: { email, name, ...assigned }, ...(await requestMeta()) });
     revalidatePath('/admin/users');
     return 'User created';

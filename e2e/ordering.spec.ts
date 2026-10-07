@@ -83,11 +83,26 @@ test('mobile cash checkout, customization, discount and full order lifecycle', a
   expect(data.order.items[0].quantity).toBe(2);
   expect(data.order.estimatedArrivalAt).toBeGreaterThan(data.order.createdAt);
   const menu = await (await page.request.get(`/api/public/stores/${slug}`)).json();
-  const staff = await browser.newContext({ baseURL: new URL(page.url()).origin });
+  const staff = await browser.newContext({ baseURL: new URL(page.url()).origin, locale: 'ar-EG' });
   const staffPage = await staff.newPage();
   await login(staffPage);
-  await transition(staff, menu.restaurant.id, data.order.id, 'ACCEPT');
-  await transition(staff, menu.restaurant.id, data.order.id, 'START_PREPARING');
+  // Exercise the simple merchant UI: the next action is prominent and printing
+  // is available only after opening the secondary options.
+  await staff.addCookies([{ name: 'merchant_store', value: menu.restaurant.id, url: new URL(page.url()).origin }]);
+  await staffPage.goto('/merchant');
+  const orderCard = staffPage.getByRole('article').filter({ has: staffPage.getByText('#' + data.order.orderNumber, { exact: true }) });
+  await expect(orderCard).toBeVisible();
+  await expect(orderCard.getByRole('button', { name: 'قبول الطلب', exact: true })).toBeVisible();
+  await expect(orderCard.getByRole('button', { name: '🖨️ طباعة', exact: true })).not.toBeVisible();
+  await orderCard.getByText('خيارات أخرى', { exact: true }).click();
+  await expect(orderCard.getByRole('button', { name: '🖨️ طباعة', exact: true })).toBeVisible();
+  await orderCard.getByText('خيارات أخرى', { exact: true }).click();
+  await orderCard.getByRole('button', { name: 'قبول الطلب', exact: true }).click();
+  await expect(orderCard.getByRole('button', { name: 'ابدأ التحضير', exact: true })).toBeVisible();
+  await orderCard.getByRole('button', { name: 'ابدأ التحضير', exact: true }).click();
+  // Optimistic cards update immediately; wait for the actual server state before
+  // the remaining transitions are sent through the authenticated API.
+  await expect.poll(async () => (await (await page.request.get(`/api/public/orders/${token}`)).json()).order.status).toBe('PREPARING');
   // A student's phone can be hours wrong. The countdown must still use server time.
   await page.addInitScript(() => {
     const realNow = Date.now.bind(Date);
@@ -116,12 +131,12 @@ test('InstaPay submission and reviewed payment advances to confirmed', async ({ 
   await page.getByRole('link', { name: /مراجعة الطلب/ }).filter({ visible: true }).click();
   await page.getByLabel('اسمك', { exact: true }).fill('تجربة التحويل');
   await page.getByLabel(/رقم الموبايل/).fill('01012345679');
-  await page.getByRole('radio', { name: /InstaPay/ }).check();
+  await page.getByRole('radio', { name: /إنستاباي/ }).check();
   const confirm = page.getByRole('button', { name: /تأكيد الطلب/ }).filter({ visible: true });
   await expect(confirm).toBeEnabled();
   await confirm.click();
   await expect(page).toHaveURL(/\/order\//);
-  await expect(page.getByRole('heading', { name: 'كمّل الدفع بـ InstaPay' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'كمّل الدفع بإنستاباي' })).toBeVisible();
   await screenshot(page, 'instapay-mobile.png', info);
   await page.getByLabel('رقم العملية (اختياري)').fill('LOCAL-QA-TRANSFER');
   await page.getByRole('button', { name: 'تم التحويل ✓' }).click();
@@ -129,7 +144,7 @@ test('InstaPay submission and reviewed payment advances to confirmed', async ({ 
   const token = page.url().split('/order/')[1];
   const data = await (await page.request.get(`/api/public/orders/${token}`)).json();
   const menu = await (await page.request.get(`/api/public/stores/${slug}`)).json();
-  const staff = await browser.newContext({ baseURL: new URL(page.url()).origin });
+  const staff = await browser.newContext({ baseURL: new URL(page.url()).origin, locale: 'ar-EG' });
   await login(await staff.newPage());
   await transition(staff, menu.restaurant.id, data.order.id, 'VERIFY_PAYMENT');
   await page.reload();
@@ -144,10 +159,10 @@ test('admin QR and branded poster downloads independently decode to the correct 
   await page.goto(`/admin/restaurants/${menu.restaurant.id}`);
   await screenshot(page, 'admin-branding.png', info);
   await page.goto(`/admin/restaurants/${menu.restaurant.id}/marketing`);
-  await page.getByLabel(/Poster label/).fill('e2e_qr');
-  await expect(page.getByRole('button', { name: 'QR PNG', exact: true })).toBeEnabled();
+  await page.getByLabel(/اسم الملصق/).fill('e2e_qr');
+  await expect(page.getByRole('button', { name: 'صورة الرمز PNG', exact: true })).toBeEnabled();
   await screenshot(page, 'admin-qr.png', info);
-  for (const [name, button] of [['qr-demo.png', 'QR PNG'], ['qr-poster-demo.png', 'Download branded poster']]) {
+  for (const [name, button] of [['qr-demo.png', 'صورة الرمز PNG'], ['qr-poster-demo.png', 'تنزيل ملصق المطعم']]) {
     const event = page.waitForEvent('download');
     await page.getByRole('button', { name: button, exact: true }).click();
     const download = await event;
@@ -159,5 +174,53 @@ test('admin QR and branded poster downloads independently decode to the correct 
     const res = await page.request.get(decoded!.data, { maxRedirects: 0 });
     expect(res.status()).toBe(307);
     expect(res.headers().location).toContain(`/s/${slug}?utm_source=e2e_qr`);
+  }
+});
+
+
+test('device language, persistent customer switch and independent staff language', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, locale: 'en-GB', viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  try {
+    await page.goto(`/s/${slug}`);
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
+    await expect(page.getByRole('heading', { name: 'Menu', exact: true })).toBeVisible();
+    await accessible(page);
+    await page.getByRole('button', { name: 'Add Fries to your basket', exact: true }).click();
+    await page.getByRole('link', { name: /Review order/ }).filter({ visible: true }).click();
+    await page.getByLabel('Your name', { exact: true }).fill('Language test');
+    await page.getByLabel(/Mobile number/).fill('01012345678');
+    await page.getByRole('group', { name: 'Display language' }).getByRole('button', { name: 'العربية', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
+    await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+    await expect(page.getByLabel('اسمك', { exact: true })).toHaveValue('Language test');
+    await expect(page.getByLabel(/رقم الموبايل/)).toHaveValue('01012345678');
+    await expect(page.getByRole('heading', { name: 'بطاطس', exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
+    await expect(page.getByRole('heading', { name: 'بطاطس', exact: true })).toBeVisible();
+    await page.getByRole('group', { name: 'لغة العرض' }).getByRole('button', { name: 'English', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.getByRole('heading', { name: 'Fries', exact: true })).toBeVisible();
+    await accessible(page);
+
+    // Customer English does not override the simple Arabic staff default.
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto('/login');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
+    await login(page);
+    await page.getByRole('group', { name: 'لغة العرض' }).filter({ visible: true }).getByRole('button', { name: 'English', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.getByRole('link', { name: 'Restaurants', exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await page.getByRole('group', { name: 'Display language' }).filter({ visible: true }).getByRole('button', { name: 'العربية', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
+    await page.goto(`/s/${slug}`);
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.getByRole('heading', { name: 'Menu', exact: true })).toBeVisible();
+  } finally {
+    await context.close();
   }
 });

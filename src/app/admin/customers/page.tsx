@@ -1,3 +1,5 @@
+import { getLocale } from '@/lib/i18n/server';
+import { text } from '@/lib/i18n';
 import { desc, ilike, or } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { customers } from '@/server/db/schema';
@@ -9,6 +11,8 @@ export const dynamic = 'force-dynamic';
 const PAGE = 50;
 
 export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
+  const locale = await getLocale();
+  const t = (ar: string, en: string) => text(locale, ar, en);
   if (!(await adminPage('/admin/customers', 'platform.restaurants'))) return <Forbidden />;
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
@@ -23,14 +27,14 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     .offset((page - 1) * PAGE);
   return (
     <div>
-      <PageTitle title="Customers" subtitle="Guest checkout — customers are identified by phone number." />
-      <form className="mb-4 flex gap-2"><input name="q" defaultValue={q ?? ''} placeholder="Phone or name" className="input max-w-xs" /><button className="btn btn-secondary">Search</button></form>
+      <PageTitle title={t("العملاء", "Customers")} subtitle={t("الطلب متاح دون حساب. رقم الهاتف يربط طلبات العميل.", "Guest checkout — customers are identified by phone number.")} />
+      <form className="mb-4 flex gap-2"><input aria-label={t("بحث", "Search")} name="q" defaultValue={q ?? ''} placeholder={t("رقم الهاتف أو الاسم", "Phone or name")} className="input max-w-xs" /><button className="btn btn-secondary">{t("بحث", "Search")}</button></form>
       <section className="card overflow-x-auto">
         <table className="table">
-          <thead><tr><th>Name</th><th>Phone</th><th>Orders</th><th>Last order</th><th>First seen</th></tr></thead>
+          <thead><tr><th>{t("الاسم", "Name")}</th><th>{t("الهاتف", "Phone")}</th><th>{t("الطلبات", "Orders")}</th><th>{t("آخر طلب", "Last order")}</th><th>{t("أول طلب", "First seen")}</th></tr></thead>
           <tbody>
             {list.slice(0, PAGE).map((c) => (
-              <tr key={c.id}><td>{c.name}</td><td className="font-mono">{c.phone}</td><td>{c.ordersCount}</td><td className="text-xs">{c.lastOrderAt ? formatDateTime(c.lastOrderAt, tz) : '—'}</td><td className="text-xs">{formatDateTime(c.createdAt, tz)}</td></tr>
+              <tr key={c.id}><td>{c.name}</td><td className="font-mono">{c.phone}</td><td>{c.ordersCount}</td><td className="text-xs">{c.lastOrderAt ? formatDateTime(c.lastOrderAt, tz, locale) : '—'}</td><td className="text-xs">{formatDateTime(c.createdAt, tz, locale)}</td></tr>
             ))}
           </tbody>
         </table>

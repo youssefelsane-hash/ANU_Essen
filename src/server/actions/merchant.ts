@@ -197,9 +197,15 @@ export async function resetStaffPasswordAction(_prev: ActionState, fd: FormData)
     if (!here.length) throw new AppError('NOT_FOUND');
     const password = str(fd, 'password');
     if (password.length < MIN_PASSWORD_LENGTH) throw new AppError('VALIDATION', `كلمة السر لازم ${MIN_PASSWORD_LENGTH} حروف على الأقل`);
-    await db().update(users).set({ passwordHash: await hashPassword(password), updatedAt: new Date() }).where(eq(users.id, userId));
+    const passwordHash = await hashPassword(password);
+    await db().transaction(async (tx) => {
+      await tx.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, userId));
+      await tx.delete(sessions).where(eq(sessions.userId, userId));
+    });
     await audit({ actor: { type: 'USER', userId: auth.user.id, label: auth.user.name }, action: 'staff.password_reset', entity: 'user', entityId: userId, restaurantId });
-    return 'تم تغيير كلمة السر';
+    revalidatePath('/merchant/staff');
+    revalidatePath('/admin/users');
+    return 'Password changed (all sessions signed out)';
   });
 }
 

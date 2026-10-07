@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useSyncExternalStore } from 'react';
 import { readJson, writeJson } from './storage';
+import { localizedName, text, type Locale } from '@/lib/i18n';
 import type { PublicMenu } from '@/lib/types';
 
 export interface CartLine {
@@ -102,15 +103,15 @@ export function useCart(slug: string) {
 }
 
 /** Display-only price estimate; the server re-prices everything at checkout. */
-export function estimateLine(menu: PublicMenu, line: CartLine): { unit: number; total: number; name: string; detail: string; available: boolean } {
+export function estimateLine(menu: PublicMenu, line: CartLine, locale: Locale = 'ar'): { unit: number; total: number; name: string; detail: string; available: boolean } {
   const product = menu.products.find((p) => p.id === line.productId);
-  if (!product) return { unit: 0, total: 0, name: 'منتج غير متاح', detail: '', available: false };
+  if (!product) return { unit: 0, total: 0, name: text(locale, 'منتج غير متاح', 'Unavailable item'), detail: '', available: false };
   const variant = product.variants.find((v) => v.id === line.variantId);
   const groups = menu.addonGroups.filter((g) => product.addonGroupIds.includes(g.id));
   const selectedAddonIds = [...new Set(line.addonIds)];
   const addonList = groups.flatMap((g) => g.addons).filter((a) => selectedAddonIds.includes(a.id));
   const unit = (variant?.price ?? product.basePrice) + addonList.reduce((s, a) => s + a.price, 0);
-  const detail = [variant?.nameAr, ...addonList.map((a) => a.nameAr)].filter(Boolean).join(' • ');
+  const detail = [variant ? localizedName(locale, variant.nameAr, variant.nameEn) : null, ...addonList.map((a) => localizedName(locale, a.nameAr, a.nameEn))].filter(Boolean).join(' • ');
   const validGroups = groups.every((g) => {
     const count = g.addons.filter((a) => selectedAddonIds.includes(a.id)).length;
     return count >= g.minSelect && (g.maxSelect === 0 || count <= g.maxSelect);
@@ -118,5 +119,5 @@ export function estimateLine(menu: PublicMenu, line: CartLine): { unit: number; 
   const available = product.isAvailable && (variant ? variant.isAvailable : product.variants.length === 0 && !line.variantId) &&
     addonList.length === selectedAddonIds.length && addonList.every((a) => a.isAvailable) && validGroups &&
     Number.isInteger(line.quantity) && line.quantity > 0 && line.quantity <= 50;
-  return { unit, total: unit * line.quantity, name: product.nameAr, detail, available };
+  return { unit, total: unit * line.quantity, name: localizedName(locale, product.nameAr, product.nameEn), detail, available };
 }

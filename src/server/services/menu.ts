@@ -17,7 +17,7 @@ import type { PublicMenu } from '../../lib/types';
 import { getRestaurantBySlug, getStoreLive } from './store';
 
 export interface MenuCatalog {
-  products: Map<string, MenuProduct & { categoryId: string; descriptionAr: string | null; imageUrl: string | null; sortOrder: number }>;
+  products: Map<string, MenuProduct & { categoryId: string; descriptionAr: string | null; descriptionEn: string | null; imageUrl: string | null; sortOrder: number }>;
   addonGroups: Map<string, MenuAddonGroup & { sortOrder: number; isActive: boolean }>;
 }
 
@@ -69,6 +69,7 @@ export async function loadMenuCatalog(d: Db, restaurantId: string): Promise<Menu
       nameAr: p.nameAr,
       nameEn: p.nameEn,
       descriptionAr: p.descriptionAr,
+      descriptionEn: p.descriptionEn,
       imageUrl: p.imageUrl,
       basePrice: p.basePrice,
       isAvailable: p.isAvailable,
@@ -151,7 +152,9 @@ export async function loadPublicMenu(d: Db, slug: string, now = new Date()): Pro
       logoUrl: r.logoUrl,
       coverImageUrl: r.coverImageUrl,
       badgeText: r.badgeText,
+      badgeTextEn: r.badgeTextEn,
       taglineAr: r.taglineAr,
+      taglineEn: r.taglineEn,
       brandColor: r.brandColor,
       phone: r.phone,
       minOrderAmount: r.minOrderAmount,
@@ -165,6 +168,7 @@ export async function loadPublicMenu(d: Db, slug: string, now = new Date()): Pro
       nameAr: p.nameAr,
       nameEn: p.nameEn,
       descriptionAr: p.descriptionAr,
+      descriptionEn: p.descriptionEn,
       imageUrl: p.imageUrl,
       basePrice: p.basePrice,
       isAvailable: p.isAvailable,
@@ -174,11 +178,12 @@ export async function loadPublicMenu(d: Db, slug: string, now = new Date()): Pro
     addonGroups: [...catalog.addonGroups.values()].map((g) => ({
       id: g.id,
       nameAr: g.nameAr,
+      nameEn: g.nameEn,
       minSelect: g.minSelect,
       maxSelect: g.maxSelect,
-      addons: g.addons.map((a) => ({ id: a.id, nameAr: a.nameAr, price: a.price, isAvailable: a.isAvailable })),
+      addons: g.addons.map((a) => ({ id: a.id, nameAr: a.nameAr, nameEn: a.nameEn, price: a.price, isAvailable: a.isAvailable })),
     })),
-    banners: bannerRows.map((b) => ({ id: b.id, titleAr: b.titleAr, subtitleAr: b.subtitleAr, imageUrl: b.imageUrl, bgColor: b.bgColor, textColor: b.textColor })),
+    banners: bannerRows.map((b) => ({ id: b.id, titleAr: b.titleAr, titleEn: b.titleEn, subtitleAr: b.subtitleAr, subtitleEn: b.subtitleEn, imageUrl: b.imageUrl, bgColor: b.bgColor, textColor: b.textColor })),
     paymentMethods: methodRows.map((m) => ({ method: m.method })),
     deliveryPoints: pointRows.map((p) => ({ id: p.id, nameAr: p.nameAr, nameEn: p.nameEn, isDefault: p.isDefault, deliveryFee: p.deliveryFee })),
   };

@@ -1,6 +1,7 @@
 import { uuid } from '@/client/ids';
 import { isTerminal, nextStatus, paymentStatusAfter, primaryActionFor, STATUS_TIMESTAMP_FIELD, TRANSITIONS, type OrderAction } from '@/lib/domain/order-machine';
 import type { ActionResult, OrderSnapshot, StoreLive, SyncResponse } from '@/lib/types';
+import { errorMessage, text, type Locale } from '@/lib/i18n';
 import { openLocalDb, readMeta, type LocalDb, type OutboxEntry } from './local-db';
 
 export type Connectivity = 'online' | 'offline' | 'syncing' | 'synced';
@@ -92,6 +93,8 @@ export class MerchantEngine {
   private backoff = POLL_MS;
   private stopped = false;
   private cleanup: (() => void)[] = [];
+  private dispatching = new Set<string>();
+  private lastQueuedAt = 0;
   private state: EngineState = {
     ready: false,
     orders: [],
@@ -111,6 +114,7 @@ export class MerchantEngine {
     private readonly userId: string,
     private readonly permissions: ReadonlySet<string>,
     private readonly onAlert: (orders: OrderSnapshot[]) => void,
+    private readonly getLocale: () => Locale = () => 'ar',
   ) {}
 
   subscribe = (cb: () => void) => {
@@ -147,6 +151,7 @@ export class MerchantEngine {
       }
     }
     this.outbox = outbox;
+    this.lastQueuedAt = outbox.reduce((latest, entry) => Math.max(latest, entry.createdAt), 0);
     this.set({ ready: true, store, serverOffset, lastSyncAt, connectivity: navigator.onLine ? 'syncing' : 'offline' });
     this.recompute();
 
@@ -173,23 +178,37 @@ export class MerchantEngine {
 
   /** Records a staff action locally (durably) and syncs it when possible. Works fully offline. */
   async dispatch(orderId: string, action: OrderAction, payload?: { reason?: string }): Promise<boolean> {
+    if (this.stopped || !this.state.ready || this.dispatching.has(orderId)) return false;
     const current = this.state.orders.find((o) => o.id === orderId);
     if (!current || !nextStatus(current.status, action)) return false;
     if (!this.permissions.has(TRANSITIONS[action].permission) && !this.permissions.has('*')) return false;
+    if (
+      (action === 'MARK_ARRIVED' || action === 'COMPLETE') &&
+      !this.permissions.has('orders.view') && !this.permissions.has('*') &&
+      current.assignedToUserId && current.assignedToUserId !== this.userId
+    ) return false;
+    const createdAt = Math.max(Date.now(), this.lastQueuedAt + 1);
+    this.lastQueuedAt = createdAt;
     const entry: OutboxEntry = {
       eventId: uuid(),
       orderId,
       action,
       occurredAt: Date.now() + this.state.serverOffset,
       payload,
-      createdAt: Date.now(),
+      createdAt,
       attempts: 0,
     };
-    await this.db.put('outbox', entry); // persisted before the UI changes
-    this.outbox.push(entry);
-    this.recompute();
-    void this.syncNow();
-    return true;
+    // Ignore rapid repeated taps until the first action has been durably saved.
+    this.dispatching.add(orderId);
+    try {
+      await this.db.put('outbox', entry); // persisted before the UI changes
+      this.outbox.push(entry);
+      this.recompute();
+      void this.syncNow();
+      return true;
+    } finally {
+      this.dispatching.delete(orderId);
+    }
   }
 
   setStore(store: StoreLive) {
@@ -222,7 +241,7 @@ export class MerchantEngine {
     } catch (err) {
       if (err instanceof AuthError) this.set({ authError: true, connectivity: 'offline' });
       else if (err instanceof NetworkError) this.set({ connectivity: 'offline' });
-      else this.set({ notice: (err as Error).message });
+      else this.set({ notice: errorMessage('INTERNAL', this.getLocale(), (err as Error).message) });
       this.backoff = Math.min(this.backoff * 1.6, 15_000);
     } finally {
       this.syncing = false;
@@ -267,7 +286,7 @@ export class MerchantEngine {
         this.outbox = this.outbox.filter((x) => x.eventId !== r.eventId);
         done++;
       }
-      if (rejected.length) this.set({ notice: 'تم تجاهل إجراء لأن الطلب اتغيّر من جهاز تاني — الشاشة اتحدثت بحالة السيرفر.' });
+      if (rejected.length) this.set({ notice: text(this.getLocale(), 'تم تجاهل إجراء لأن الطلب اتغيّر من جهاز تاني — الشاشة اتحدثت بحالة السيرفر.', 'This order changed on another device. The board now shows the latest saved status.') });
       this.recompute();
       if (retry) break;
     }

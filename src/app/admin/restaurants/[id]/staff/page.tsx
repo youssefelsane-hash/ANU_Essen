@@ -1,3 +1,5 @@
+import { getLocale } from '@/lib/i18n/server';
+import { text, localizedName } from '@/lib/i18n';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 import { db } from '@/server/db';
@@ -9,6 +11,8 @@ import { Forbidden, PageTitle, RestaurantTabs } from '@/components/admin/ui';
 export const dynamic = 'force-dynamic';
 
 export default async function RestaurantStaffPage({ params }: { params: Promise<{ id: string }> }) {
+  const locale = await getLocale();
+  const t = (ar: string, en: string) => text(locale, ar, en);
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
   const auth = await adminPage(`/admin/restaurants/${id}/staff`, 'platform.users');
@@ -17,9 +21,9 @@ export default async function RestaurantStaffPage({ params }: { params: Promise<
   if (!r) notFound();
   return (
     <div>
-      <PageTitle title={`${r.nameEn} — Staff`} />
+      <PageTitle title={`${localizedName(locale, r.nameAr, r.nameEn)} — ${t("الفريق", "Team")}`} />
       <RestaurantTabs id={id} active="staff" />
-      <StaffManager restaurantId={id} canAssignProtected currentUserId={auth.user.id} />
+      <StaffManager restaurantId={id} timezone={r.timezone} canAssignProtected currentUserId={auth.user.id} />
     </div>
   );
 }

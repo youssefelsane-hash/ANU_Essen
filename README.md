@@ -7,7 +7,7 @@ First restaurant: **الراية الدمشقية**. Each restaurant has indepen
 
 ## Premium ordering update — 7 October 2026
 
-- Arabic mobile-first menu with search, category filters, accessible product customization, saved baskets and previous-order tracking.
+- Arabic/English mobile-first menu with search, category filters, accessible product customization, saved baskets and previous-order tracking.
 - Compact checkout with editable quantities, promo codes, pickup choices, accurate cart-specific ETA and safe retry behavior.
 - Tracking with server-corrected countdowns, explicit provisional estimates, delayed-order wording and manual InstaPay review.
 - Super admin controls restaurant names, badge, tagline, logo, cover and color with live previews.
@@ -15,6 +15,16 @@ First restaurant: **الراية الدمشقية**. Each restaurant has indepen
 - Ordering/expiry concurrency and tenant isolation fixes, including user- and permission-scoped offline caches.
 
 The supplied food photography is **illustrative demo imagery**. Replace it with actual restaurant/product photos before launch. Provenance is documented in `public/images/README.md`.
+
+## Bilingual operations and capacity update
+
+Customer pages follow the device's supported language (Arabic or English, otherwise English). Staff and admin pages start in Arabic. Every area has a visible language switch, with separate customer/staff preferences that persist across refreshes. Restaurant badges, taglines, product descriptions, menu banners and payment instructions can be edited in both languages; optional untranslated content falls back to the available value. Names, notes and custom cancellation reasons retain their author's wording.
+
+Daily admin navigation and kitchen actions are simplified. The next order action is prominent, with printing/cancellation under secondary options. Advanced branding, financial details and opening-hours settings remain editable behind disclosures.
+
+Phone admission is charged once per newly committed order. Simultaneous retries replay the same order even after the phone allowance is exhausted. IP protection remains enabled and its default accommodates campus Wi-Fi users sharing one address. Migration builds serialize with a PostgreSQL transaction lock.
+
+See [the Arabic release report](docs/RELEASE_REPORT-ar.md) and [Vercel setup guide](docs/VERCEL_SETUP-ar.md).
 
 ```
 Student:   QR → Menu → Cart → Checkout → InstaPay / Cash → Order # → Live countdown → Delivered at the gate
@@ -99,7 +109,7 @@ npm run dev
 - Promo code in the seed: `WELCOME10` (10% from 100 EGP, max 30 EGP)
 
 ```bash
-npm test            # 78 tests: domain units + integration + full acceptance scenario
+npm test            # 104 tests: domain, integration, language, offline and admission regressions
 npm run typecheck
 npm run db:reset    # local only: wipe, migrate, seed
 ```
@@ -110,11 +120,13 @@ Tests need no Docker: they run the real SQL migrations on an in-memory Postgres 
 
 ## 3. Deploy (Vercel + Neon/Supabase)
 
-1. Create a Postgres database (Neon free tier in **Frankfurt** matches `vercel.json` → `fra1`, the closest region to Egypt).
+1. Create a Postgres database in **Frankfurt**, matching `vercel.json` → `fra1`. Choose its compute size after testing the hosted preview.
 2. Import this repo in Vercel. Set the environment variables:
    - `DATABASE_URL` (pooled URL is fine; the app uses `prepare: false`)
    - `APP_URL` = your public URL (used for QR codes)
    - optional: `DB_POOL_MAX` (default 5), `LOG_LEVEL`
+   - optional: `DATABASE_MIGRATION_URL` for a direct migration connection, otherwise migrations use `DATABASE_URL`
+   - Keep Preview and Production database URLs separate. Each build applies migrations to its configured database.
 3. Deploy. `vercel-build` runs `db:migrate` and then `next build`, so migrations apply on every deploy.
 4. Seed once from your machine against the production DB:
    ```bash
@@ -232,7 +244,7 @@ The receipt is designed for 80 mm (or 58 mm) thermal printers using print CSS (`
 
 ## 11. Tests
 
-`npm test` runs 78 tests:
+`npm test` runs 104 tests:
 - `queue.test.ts`: the spec's load→prep table (25→7, 35→8, 48→10, 55→12…), config-driven, ETA math, load levels
 - `order-machine.test.ts`: allowed and forbidden transitions, actor rules, payment status
 - `pricing.test.ts`: variants, add-ons, availability, promo codes and limits, the spec's commission example (200−20=180 → 9 → net 171)
@@ -242,6 +254,10 @@ The receipt is designed for 80 mm (or 58 mm) thermal printers using print CSS (`
 - `reliability.test.ts`: cart-aware ETA, deadlines, action replay, concurrent promo retries, tenant identity and safe payment links
 - `cart-offline.test.ts`: damaged storage, unavailable selections and shared-terminal cache isolation
 - `restaurant-identity.test.ts`: isolated branding, stable redirects and independent QR round-trip decoding
+- `language.test.ts` / `customer-language.test.ts`: browser language negotiation, separate preferences, translated messages and frozen bilingual order details
+- `merchant-engine.test.ts`: repeated taps, ordered offline replay, device clock rollback and bilingual receipts
+- `checkout-admission.test.ts`: 100 concurrent same-key retries, exhausted phone allowance, distinct-order limits and rollback
+- `staff-password.test.ts`: atomic password reset/session revocation
 
 Browser checks run against a **local, seeded demo database** and create demo orders:
 
@@ -251,13 +267,24 @@ E2E_BASE_URL=http://localhost:3000 E2E_ADMIN_EMAIL=admin@example.com E2E_ADMIN_P
 # If Chrome is installed, add PLAYWRIGHT_CHANNEL=chrome instead of installing Chromium.
 ```
 
-The three browser scenarios cover customized cash checkout and every fulfilment step, manual InstaPay review, and QR/poster downloads decoded independently with jsQR. Menu, checkout and tracking also receive automated WCAG 2 A/AA checks; these do not replace testing with real people and assistive technologies.
+The four browser scenarios cover customized cash checkout and every fulfilment step, manual InstaPay review, QR/poster downloads decoded independently with jsQR, and independent bilingual preferences. Menu, checkout and tracking also receive automated WCAG 2 A/AA checks; these do not replace testing with real people and assistive technologies.
 
 A separate real PostgreSQL verification uses 12 connections, creates unique temporary fixtures, exercises concurrent checkout/action/promotion/ETA/sync cases, then removes those fixtures. It refuses remote or production databases:
 
 ```bash
 npm run test:postgres
 ```
+
+Real HTTP capacity verification requires the local production server and local database. It creates a separate temporary restaurant, sends bursts of 100 simultaneous requests from a shared IP, verifies every fulfilment stage, sync/events/accounting, phone replay and full-kitchen rejection, then removes its fixtures:
+
+```bash
+npm run vercel-build
+npm run start -- --port 3107
+# In a separate terminal:
+npm run test:capacity -- --report=work/performance-results.json
+```
+
+The measured local checkout p95 was 832 ms for one burst of 100 distinct orders. These measurements do not establish hosted Vercel cold-start, sustained load or real-network capacity. Kitchen limits count confirmed/preparing orders; pending payment/acceptance does not reserve kitchen capacity.
 
 Observed local validation: 24 same-key requests created one order, 24 final-promo retries consumed one allowance, 12 action retries applied once, and concurrent traffic yielded 80 unique, gap-free events. This is a short burst test, not a sustained load or network-failure benchmark.
 

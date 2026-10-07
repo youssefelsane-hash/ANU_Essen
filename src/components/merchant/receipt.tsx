@@ -4,49 +4,52 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getPaperWidth } from '@/client/merchant/printing';
 import { formatDateTime, formatMoney } from '@/lib/domain/misc';
-import { PAYMENT_METHOD_AR } from '@/lib/labels';
+import { useLanguage } from '@/components/language-provider';
+import { labels, localizedName } from '@/lib/i18n';
 import type { OrderSnapshot } from '@/lib/types';
 
 export function Receipt({ order, restaurantName, timezone }: { order: OrderSnapshot; restaurantName: string; timezone: string }) {
+  const { locale, t } = useLanguage();
+  const copy = labels(locale);
   const paid = order.paymentStatus === 'PAYMENT_VERIFIED';
   return (
-    <div className="receipt">
+    <div className="receipt" style={{ direction: locale === 'ar' ? 'rtl' : 'ltr' }}>
       <h1>{restaurantName}</h1>
       <div className="big" dir="ltr">#{order.orderNumber}</div>
-      <div className="muted" style={{ textAlign: 'center' }} dir="ltr">{formatDateTime(order.createdAt, timezone)}</div>
+      <div className="muted" style={{ textAlign: 'center' }} dir="ltr">{formatDateTime(order.createdAt, timezone, locale)}</div>
       <hr />
-      <div>العميل: <b>{order.customerName}</b></div>
-      {order.customerPhone && <div dir="ltr" style={{ textAlign: 'right' }}>{order.customerPhone}</div>}
+      <div>{t('العميل', 'Customer')}: <b>{order.customerName}</b></div>
+      {order.customerPhone && <div dir="ltr" style={{ textAlign: locale === 'ar' ? 'right' : 'left' }}>{order.customerPhone}</div>}
       <hr />
       {order.items.map((it) => (
         <div key={it.id} style={{ marginBottom: '1mm' }}>
           <div className="row">
             <span>
-              {it.quantity} × {it.nameAr}
-              {it.variantNameAr ? ` (${it.variantNameAr})` : ''}
+              {it.quantity} × {localizedName(locale, it.nameAr, it.nameEn)}
+              {it.variantNameAr ? ` (${localizedName(locale, it.variantNameAr, it.variantNameEn)})` : ''}
             </span>
-            <span>{formatMoney(it.lineTotal)}</span>
+            <span>{formatMoney(it.lineTotal, locale)}</span>
           </div>
           {it.addons.map((a, i) => (
-            <div key={i} className="muted">&nbsp;&nbsp;+ {a.nameAr}</div>
+            <div key={i} className="muted">&nbsp;&nbsp;+ {localizedName(locale, a.nameAr, a.nameEn)}</div>
           ))}
           {it.note && <div className="muted">&nbsp;&nbsp;* {it.note}</div>}
         </div>
       ))}
       <hr />
-      <div className="row"><span>المجموع</span><span>{formatMoney(order.subtotal)}</span></div>
-      {order.discountTotal > 0 && <div className="row"><span>الخصم</span><span>-{formatMoney(order.discountTotal)}</span></div>}
-      {order.deliveryFee > 0 && <div className="row"><span>التوصيل</span><span>{formatMoney(order.deliveryFee)}</span></div>}
-      <div className="row" style={{ fontWeight: 800, fontSize: '14px' }}><span>الإجمالي</span><span>{formatMoney(order.total)}</span></div>
+      <div className="row"><span>{t('المجموع', 'Subtotal')}</span><span>{formatMoney(order.subtotal, locale)}</span></div>
+      {order.discountTotal > 0 && <div className="row"><span>{t('الخصم', 'Discount')}</span><span>-{formatMoney(order.discountTotal, locale)}</span></div>}
+      {order.deliveryFee > 0 && <div className="row"><span>{t('التوصيل', 'Delivery')}</span><span>{formatMoney(order.deliveryFee, locale)}</span></div>}
+      <div className="row" style={{ fontWeight: 800, fontSize: '14px' }}><span>{t('الإجمالي', 'Total')}</span><span>{formatMoney(order.total, locale)}</span></div>
       <hr />
       <div>
-        الدفع: {PAYMENT_METHOD_AR[order.paymentMethod]} —{' '}
-        <b>{paid ? 'مدفوع PAID' : order.paymentMethod === 'CASH' ? `يُحصّل ${formatMoney(order.total)}` : 'لم يتم التأكيد'}</b>
+        {t('الدفع', 'Payment')}: {copy.paymentMethod[order.paymentMethod]} —{' '}
+        <b>{paid ? t('مدفوع ✓', 'PAID ✓') : order.paymentMethod === 'CASH' ? t(`يُحصّل ${formatMoney(order.total, locale)}`, `Collect ${formatMoney(order.total, locale)}`) : t('لم يتم تأكيد الدفع', 'Payment not confirmed')}</b>
       </div>
-      <div>الاستلام: <b>{order.deliveryPointName}</b></div>
-      {order.customerNote && <div>ملاحظة: {order.customerNote}</div>}
+      <div>{t('الاستلام', 'Pickup point')}: <b>{localizedName(locale, order.deliveryPointName, order.deliveryPointNameEn)}</b></div>
+      {order.customerNote && <div>{t('ملاحظة', 'Note')}: {order.customerNote}</div>}
       <hr />
-      <div className="muted" style={{ textAlign: 'center' }}>شكرًا لطلبك ♥</div>
+      <div className="muted" style={{ textAlign: 'center' }}>{t('شكرًا لطلبك ♥', 'Thank you for your order ♥')}</div>
     </div>
   );
 }
@@ -78,10 +81,11 @@ export function PrintPortal({ order, restaurantName, timezone, onDone }: { order
 }
 
 export function PrintButton({ order, restaurantName, timezone, className = 'btn btn-secondary' }: { order: OrderSnapshot; restaurantName: string; timezone: string; className?: string }) {
+  const { t } = useLanguage();
   const [printing, setPrinting] = useState(false);
   return (
     <>
-      <button className={className} onClick={() => setPrinting(true)}>🖨️ طباعة الفاتورة</button>
+      <button className={className} onClick={() => setPrinting(true)}>🖨️ {t('طباعة الفاتورة', 'Print receipt')}</button>
       {printing && <PrintPortal order={order} restaurantName={restaurantName} timezone={timezone} onDone={() => setPrinting(false)} />}
     </>
   );
