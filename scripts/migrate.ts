@@ -19,6 +19,12 @@ const LOCK = 1791373107;
  */
 async function main() {
   const raw = process.env.DATABASE_MIGRATION_URL || process.env.DATABASE_URL;
+  if (!raw?.trim() && process.env.VERCEL_ENV === 'preview') {
+    // PR previews must never touch the production database. Without a separate preview
+    // database the preview still builds (pages that need data show an error); production is unaffected.
+    console.log('! Preview deployment without its own DATABASE_URL — skipping migrations. Add a separate, non-production database to the Preview environment to use preview links.');
+    return;
+  }
   if (!raw?.trim()) {
     console.error('Database migration failed: DATABASE_URL is not set for this environment.');
     console.error('Vercel → Project → Settings → Environment Variables → add DATABASE_URL (Production), then redeploy.');
