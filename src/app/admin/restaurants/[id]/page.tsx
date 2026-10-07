@@ -8,6 +8,7 @@ import { getRestaurant } from '@/server/services/store';
 import { saveDeliveryPointAction, updatePaymentMethodAction, updateRestaurantAction } from '@/server/actions/admin-restaurants';
 import { ActionForm, SubmitButton } from '@/components/forms';
 import { HoursEditor } from '@/components/admin/editors';
+import { RestaurantBrandEditor } from '@/components/admin/restaurant-brand-editor';
 import { Forbidden, PageTitle, RestaurantTabs } from '@/components/admin/ui';
 
 export const dynamic = 'force-dynamic';
@@ -37,19 +38,18 @@ export default async function RestaurantSettingsPage({ params }: { params: Promi
   return (
     <div>
       <PageTitle title={r.nameEn} subtitle={r.nameAr}>
-        <a href={`/s/${r.slug}`} target="_blank" className="btn btn-secondary btn-sm">Open customer menu ↗</a>
+        <a href={`/s/${r.slug}`} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">Open customer menu ↗</a>
       </PageTitle>
       <RestaurantTabs id={id} active="settings" />
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="card">
-          <h2 className="mb-3 font-bold">General</h2>
+          <h2 className="mb-1 font-bold">Restaurant identity & operations</h2>
+          <p className="mb-5 text-sm text-gray-500">Give each restaurant its own name, badge, photos and color. The preview updates as you edit.</p>
           <ActionForm action={updateRestaurantAction} className="grid gap-3 sm:grid-cols-2">
             <input type="hidden" name="id" value={r.id} />
-            <Field label="Name (Arabic)"><input name="nameAr" defaultValue={r.nameAr} className="input" dir="rtl" required /></Field>
-            <Field label="Name (English)"><input name="nameEn" defaultValue={r.nameEn} className="input" required /></Field>
-            <Field label="URL slug (/s/…)"><input name="slug" defaultValue={r.slug} className="input" required /></Field>
+            <div className="mb-3 sm:col-span-2"><RestaurantBrandEditor initial={r} /></div>
+            <Field label="URL slug (/s/…)"><input name="slug" defaultValue={r.slug} maxLength={48} className="input" required /><p className="mt-1 text-[11px] text-gray-500">Changing this updates direct menu links. Permanent QR links keep working.</p></Field>
             <Field label="Phone (shown to customers)"><input name="phone" defaultValue={r.phone ?? ''} className="input" /></Field>
-            <Field label="Logo URL"><input name="logoUrl" defaultValue={r.logoUrl ?? ''} className="input" /></Field>
             <Field label="Timezone"><input name="timezone" defaultValue={r.timezone} className="input" /></Field>
             <Field label="Ordering status">
               <select name="orderingStatus" defaultValue={r.orderingStatus} className="input">
@@ -69,7 +69,7 @@ export default async function RestaurantSettingsPage({ params }: { params: Promi
             </div>
             <div className="sm:col-span-2"><SubmitButton>Save settings</SubmitButton></div>
           </ActionForm>
-          <p className="mt-3 text-xs text-gray-500">Commission changes apply to new orders only — every order stores a snapshot of the rate it was created with.</p>
+          <p className="mt-3 text-xs leading-relaxed text-gray-500">Your QR poster uses a permanent restaurant link, so renaming or changing the slug keeps printed codes working. Commission changes apply to new orders; each order keeps its original rate.</p>
         </section>
 
         <div className="space-y-6">

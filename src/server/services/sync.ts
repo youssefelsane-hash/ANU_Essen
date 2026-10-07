@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { devices, orderEvents, orders, storeCounters } from '../db/schema';
 import { AppError } from '../errors';
@@ -55,16 +55,17 @@ export async function merchantSync(params: {
 
   if (params.cursor <= 0 || params.cursor > head) {
     // Bootstrap (or the server was reset): active orders + recent history, then continue from head.
-    reset = params.cursor > head;
+    reset = true;
     cursor = head;
     const since = new Date(Date.now() - BOOTSTRAP_HOURS * 3_600_000);
-    const rows = await d
-      .select({ id: orders.id })
-      .from(orders)
-      .where(and(eq(orders.restaurantId, restaurantId), or(inArray(orders.status, [...ACTIVE_STATUSES]), gte(orders.createdAt, since))))
-      .orderBy(desc(orders.createdAt))
-      .limit(300);
-    orderIds = rows.map((r) => r.id);
+    const [active, recent] = await Promise.all([
+      d.select({ id: orders.id }).from(orders)
+        .where(and(eq(orders.restaurantId, restaurantId), inArray(orders.status, [...ACTIVE_STATUSES]))),
+      d.select({ id: orders.id }).from(orders)
+        .where(and(eq(orders.restaurantId, restaurantId), gte(orders.createdAt, since)))
+        .orderBy(desc(orders.createdAt)).limit(300),
+    ]);
+    orderIds = [...new Set([...active, ...recent].map((r) => r.id))];
   } else {
     const events = await d
       .select({ seq: orderEvents.seq, orderId: orderEvents.orderId })

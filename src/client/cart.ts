@@ -17,7 +17,7 @@ const cache = new Map<string, CartLine[]>();
 const storageKey = (slug: string) => `cart:v1:${slug}`;
 
 function load(slug: string): CartLine[] {
-  if (!cache.has(slug)) cache.set(slug, readJson<CartLine[]>(storageKey(slug), []));
+  if (!cache.has(slug)) cache.set(slug, normalizeCart(readJson<unknown>(storageKey(slug), [])));
   return cache.get(slug)!;
 }
 
@@ -30,12 +30,33 @@ function save(slug: string, lines: CartLine[]) {
 export const lineKey = (productId: string, variantId: string | null, addonIds: string[]) =>
   [productId, variantId ?? '-', [...addonIds].sort().join('.')].join('|');
 
+/** Saved carts may outlive a deployment or contain damaged browser storage. */
+export function normalizeCart(value: unknown): CartLine[] {
+  if (!Array.isArray(value)) return [];
+  const lines = new Map<string, CartLine>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as Partial<CartLine>;
+    if (typeof row.productId !== 'string' || !row.productId ||
+        (row.variantId !== null && row.variantId !== undefined && typeof row.variantId !== 'string') ||
+        !Number.isInteger(row.quantity) || (row.quantity ?? 0) <= 0 ||
+        !Array.isArray(row.addonIds) || row.addonIds.some((id) => typeof id !== 'string' || !id)) continue;
+    const variantId = row.variantId || null;
+    const addonIds = [...new Set(row.addonIds)].sort().slice(0, 20);
+    const key = lineKey(row.productId, variantId, addonIds);
+    const existing = lines.get(key);
+    if (!existing && lines.size >= 30) continue;
+    lines.set(key, { key, productId: row.productId, variantId, addonIds, quantity: Math.min(50, (existing?.quantity ?? 0) + row.quantity!) });
+  }
+  return [...lines.values()];
+}
+
 export function useCart(slug: string) {
   const lines = useSyncExternalStore(
     (cb) => {
       listeners.add(cb);
       const onStorage = (e: StorageEvent) => {
-        if (e.key === storageKey(slug)) {
+        if (e.key === storageKey(slug) || e.key === null) {
           cache.delete(slug);
           cb();
         }
@@ -52,6 +73,8 @@ export function useCart(slug: string) {
 
   const add = useCallback(
     (productId: string, variantId: string | null, addonIds: string[], quantity: number) => {
+      if (!Number.isInteger(quantity) || quantity <= 0) return;
+      addonIds = [...new Set(addonIds)].sort();
       const key = lineKey(productId, variantId, addonIds);
       const current = load(slug);
       const existing = current.find((l) => l.key === key);
@@ -59,13 +82,14 @@ export function useCart(slug: string) {
         slug,
         existing
           ? current.map((l) => (l.key === key ? { ...l, quantity: Math.min(50, l.quantity + quantity) } : l))
-          : [...current, { key, productId, variantId, addonIds, quantity }],
+          : [...current, { key, productId, variantId, addonIds, quantity: Math.min(50, quantity) }],
       );
     },
     [slug],
   );
   const setQuantity = useCallback(
     (key: string, quantity: number) => {
+      if (!Number.isInteger(quantity)) return;
       const current = load(slug);
       save(slug, quantity <= 0 ? current.filter((l) => l.key !== key) : current.map((l) => (l.key === key ? { ...l, quantity: Math.min(50, quantity) } : l)));
     },
@@ -80,9 +104,17 @@ export function estimateLine(menu: PublicMenu, line: CartLine): { unit: number; 
   const product = menu.products.find((p) => p.id === line.productId);
   if (!product) return { unit: 0, total: 0, name: 'منتج غير متاح', detail: '', available: false };
   const variant = product.variants.find((v) => v.id === line.variantId);
-  const addonList = menu.addonGroups.flatMap((g) => g.addons).filter((a) => line.addonIds.includes(a.id));
+  const groups = menu.addonGroups.filter((g) => product.addonGroupIds.includes(g.id));
+  const selectedAddonIds = [...new Set(line.addonIds)];
+  const addonList = groups.flatMap((g) => g.addons).filter((a) => selectedAddonIds.includes(a.id));
   const unit = (variant?.price ?? product.basePrice) + addonList.reduce((s, a) => s + a.price, 0);
   const detail = [variant?.nameAr, ...addonList.map((a) => a.nameAr)].filter(Boolean).join(' • ');
-  const available = product.isAvailable && (variant ? variant.isAvailable : product.variants.length === 0) && addonList.every((a) => a.isAvailable);
+  const validGroups = groups.every((g) => {
+    const count = g.addons.filter((a) => selectedAddonIds.includes(a.id)).length;
+    return count >= g.minSelect && (g.maxSelect === 0 || count <= g.maxSelect);
+  });
+  const available = product.isAvailable && (variant ? variant.isAvailable : product.variants.length === 0 && !line.variantId) &&
+    addonList.length === selectedAddonIds.length && addonList.every((a) => a.isAvailable) && validGroups &&
+    Number.isInteger(line.quantity) && line.quantity > 0 && line.quantity <= 50;
   return { unit, total: unit * line.quantity, name: product.nameAr, detail, available };
 }

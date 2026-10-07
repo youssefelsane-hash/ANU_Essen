@@ -158,6 +158,10 @@ export interface PublicMenu {
     nameAr: string;
     nameEn: string;
     logoUrl: string | null;
+    coverImageUrl: string | null;
+    badgeText: string | null;
+    taglineAr: string | null;
+    brandColor: string;
     phone: string | null;
     minOrderAmount: number;
     requirePhone: boolean;

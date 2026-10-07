@@ -34,7 +34,7 @@ export default async function MarketingPage({ params }: { params: Promise<{ id: 
       <div className="space-y-6">
         <section className="card">
           <h2 className="mb-3 font-bold">QR code for posters</h2>
-          <QrGenerator slug={r.slug} baseUrl={process.env.APP_URL ?? null} />
+          <QrGenerator restaurant={r} baseUrl={process.env.APP_URL ?? null} />
         </section>
 
         <section className="card">

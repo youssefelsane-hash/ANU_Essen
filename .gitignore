@@ -11,3 +11,7 @@ next-env.d.ts
 .DS_Store
 npm-debug.log*
 .claude/
+
+# Browser test artifacts
+/test-results/
+/playwright-report/

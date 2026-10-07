@@ -10,6 +10,7 @@ import type { OrderSnapshot, StoreLive } from '@/lib/types';
 import { PrintPortal } from './receipt';
 
 interface Props {
+  userId: string;
   restaurant: { id: string; nameAr: string; timezone: string };
   permissions: string[];
 }
@@ -95,7 +96,7 @@ function mmss(ms: number) {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export function KitchenBoard({ restaurant, permissions }: Props) {
+export function KitchenBoard({ restaurant, permissions, userId }: Props) {
   const perms = useMemo(() => new Set(permissions), [permissions]);
   const [engine, setEngine] = useState<MerchantEngine | null>(null);
   const chime = useChime();
@@ -109,11 +110,11 @@ export function KitchenBoard({ restaurant, permissions }: Props) {
   const [startError, setStartError] = useState<string | null>(null);
 
   useEffect(() => {
-    const e = new MerchantEngine(restaurant.id, perms, (o) => alertRef.current(o));
+    const e = new MerchantEngine(restaurant.id, userId, perms, (o) => alertRef.current(o));
     setEngine(e);
     e.start().catch((err) => setStartError(String(err?.message ?? err)));
     return () => e.stop();
-  }, [restaurant.id, perms]);
+  }, [restaurant.id, userId, perms]);
 
   useEffect(() => {
     setPaper(getPaperWidth());

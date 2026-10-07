@@ -4,7 +4,7 @@ import { and, eq, inArray, ne } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
-import { db } from '../db';
+import { db, isUniqueViolation } from '../db';
 import {
   addonGroups,
   addons,
@@ -32,9 +32,14 @@ import { fromZonedInputValue, weeklyHoursSchema } from '../../lib/domain/hours';
 import { parseMoney, slugify } from '../../lib/domain/misc';
 import { PROMOTION_TYPES } from '../../lib/domain/pricing';
 import { queueConfigSchema } from '../../lib/domain/queue';
+import { restaurantBrandSchema, restaurantImageUrlSchema } from '../../lib/domain/restaurant-brand';
 
 const actor = (auth: AuthContext) => ({ type: 'USER' as const, userId: auth.user.id, label: auth.user.name });
 const uuid = (v: string) => z.uuid().parse(v);
+const webUrl = z.url().refine((value) => {
+  const url = new URL(value);
+  return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password;
+}, 'Use an http(s) payment link without embedded credentials');
 const money = (fd: FormData, key: string, required = true) => {
   const v = parseMoney(str(fd, key));
   if (v === null && required) throw new AppError('VALIDATION', `${key}: invalid amount`);
@@ -61,20 +66,23 @@ export async function createRestaurantAction(_prev: ActionState, fd: FormData): 
   let id = '';
   const res = await runAction(async () => {
     const auth = await requirePermission('platform.restaurants');
-    const nameAr = z.string().min(2).max(80).parse(str(fd, 'nameAr'));
-    const nameEn = z.string().min(2).max(80).parse(str(fd, 'nameEn'));
-    const slug = slugify(str(fd, 'slug') || nameEn);
+    const brand = restaurantBrandSchema.parse({ nameAr: str(fd, 'nameAr'), nameEn: str(fd, 'nameEn'), badgeText: optStr(fd, 'badgeText'), taglineAr: optStr(fd, 'taglineAr'), brandColor: optStr(fd, 'brandColor') ?? undefined, logoUrl: optStr(fd, 'logoUrl'), coverImageUrl: optStr(fd, 'coverImageUrl') });
+    const slug = slugify(str(fd, 'slug') || brand.nameEn);
     if (!slug) throw new AppError('VALIDATION', 'Slug is required (latin letters/numbers)');
     const [taken] = await db().select({ id: restaurants.id }).from(restaurants).where(eq(restaurants.slug, slug));
     if (taken) throw new AppError('CONFLICT', `Slug "${slug}" is already used`);
     const [defaultCommission] = await db().select().from(systemSettings).where(eq(systemSettings.key, 'defaults.commissionBps'));
-    const r = await bootstrapRestaurant(
-      db(),
-      { slug, nameAr, nameEn, commissionBps: typeof defaultCommission?.value === 'number' ? defaultCommission.value : 500 },
-      await getDefaultQueueConfig(db()),
-    );
+    let r;
+    try {
+      r = await bootstrapRestaurant(db(), { slug, ...brand, commissionBps: typeof defaultCommission?.value === 'number' ? defaultCommission.value : 500 }, await getDefaultQueueConfig(db()));
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new AppError('CONFLICT', `Slug "${slug}" is already used`);
+      throw error;
+    }
     id = r.id;
-    await audit({ actor: actor(auth), action: 'restaurant.created', entity: 'restaurant', entityId: r.id, restaurantId: r.id, after: { slug, nameAr, nameEn }, ...(await requestMeta()) });
+    await audit({ actor: actor(auth), action: 'restaurant.created', entity: 'restaurant', entityId: r.id, restaurantId: r.id, after: { slug, ...brand }, ...(await requestMeta()) });
+    revalidatePath('/');
+    revalidatePath('/admin/restaurants');
   });
   if (res.ok) redirect(`/admin/restaurants/${id}`);
   return res;
@@ -103,10 +111,8 @@ export async function updateRestaurantAction(_prev: ActionState, fd: FormData): 
     }
     const patch = {
       slug,
-      nameAr: z.string().min(2).max(80).parse(str(fd, 'nameAr')),
-      nameEn: z.string().min(2).max(80).parse(str(fd, 'nameEn')),
+      ...restaurantBrandSchema.parse({ nameAr: str(fd, 'nameAr'), nameEn: str(fd, 'nameEn'), badgeText: optStr(fd, 'badgeText'), taglineAr: optStr(fd, 'taglineAr'), brandColor: str(fd, 'brandColor'), logoUrl: optStr(fd, 'logoUrl'), coverImageUrl: optStr(fd, 'coverImageUrl') }),
       phone: optStr(fd, 'phone'),
-      logoUrl: optStr(fd, 'logoUrl') ? z.url().parse(str(fd, 'logoUrl')) : null,
       timezone,
       orderingStatus: z.enum(['OPEN', 'PAUSED', 'CLOSED']).parse(str(fd, 'orderingStatus')),
       minOrderAmount: money(fd, 'minOrder')!,
@@ -118,13 +124,23 @@ export async function updateRestaurantAction(_prev: ActionState, fd: FormData): 
     };
     const changes = diff(before as unknown as Record<string, unknown>, patch);
     if (!changes.changed) return 'Nothing changed';
-    await db().update(restaurants).set({ ...patch, updatedAt: new Date(), version: before.version + 1 }).where(eq(restaurants.id, id));
+    try {
+      await db().update(restaurants).set({ ...patch, updatedAt: new Date(), version: before.version + 1 }).where(eq(restaurants.id, id));
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new AppError('CONFLICT', `Slug "${slug}" is already used`);
+      throw error;
+    }
     const meta = await requestMeta();
     await audit({ actor: actor(auth), action: 'restaurant.updated', entity: 'restaurant', entityId: id, restaurantId: id, before: changes.before, after: changes.after, ...meta });
     if (patch.commissionBps !== before.commissionBps) {
       await audit({ actor: actor(auth), action: 'restaurant.commission_changed', entity: 'restaurant', entityId: id, restaurantId: id, before: { commissionBps: before.commissionBps }, after: { commissionBps: patch.commissionBps }, ...meta });
     }
     revalidatePath(`/admin/restaurants/${id}`);
+    revalidatePath(`/admin/restaurants/${id}/marketing`);
+    revalidatePath('/admin/restaurants');
+    revalidatePath(`/s/${before.slug}`);
+    revalidatePath(`/s/${patch.slug}`);
+    revalidatePath('/');
     return 'Saved';
   });
 }
@@ -138,7 +154,7 @@ export async function updatePaymentMethodAction(_prev: ActionState, fd: FormData
       accountName: optStr(fd, 'accountName') ?? undefined,
       address: optStr(fd, 'address') ?? undefined,
       phone: optStr(fd, 'phone') ?? undefined,
-      link: optStr(fd, 'link') ? z.url().parse(str(fd, 'link')) : undefined,
+      link: optStr(fd, 'link') ? webUrl.parse(str(fd, 'link')) : undefined,
       instructions: optStr(fd, 'instructions') ?? undefined,
     };
     const isEnabled = bool(fd, 'isEnabled');
@@ -263,7 +279,7 @@ export async function saveProductAction(_prev: ActionState, fd: FormData): Promi
       nameEn: z.string().min(1).max(80).parse(str(fd, 'nameEn')),
       descriptionAr: optStr(fd, 'descriptionAr'),
       descriptionEn: optStr(fd, 'descriptionEn'),
-      imageUrl: optStr(fd, 'imageUrl') ? z.url().parse(str(fd, 'imageUrl')) : null,
+      imageUrl: restaurantImageUrlSchema.parse(optStr(fd, 'imageUrl')),
       basePrice: money(fd, 'basePrice')!,
       prepLoadUnits: loadUnits,
       sortOrder: int(fd, 'sortOrder'),
@@ -390,7 +406,7 @@ export async function saveBannerAction(_prev: ActionState, fd: FormData): Promis
     const values = {
       titleAr: z.string().min(2).max(120).parse(str(fd, 'titleAr')),
       subtitleAr: optStr(fd, 'subtitleAr'),
-      imageUrl: optStr(fd, 'imageUrl') ? z.url().parse(str(fd, 'imageUrl')) : null,
+      imageUrl: restaurantImageUrlSchema.parse(optStr(fd, 'imageUrl')),
       bgColor: color.parse(str(fd, 'bgColor') || '#c2410c'),
       textColor: color.parse(str(fd, 'textColor') || '#ffffff'),
       sortOrder: int(fd, 'sortOrder'),

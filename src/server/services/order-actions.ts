@@ -1,7 +1,7 @@
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, lte, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import { db, isUniqueViolation } from '../db';
-import { deliveryPoints, orderEvents, orders, paymentAttachments, payments, storeCounters } from '../db/schema';
+import { deliveryPoints, orderEvents, orders, paymentAttachments, payments, restaurants, storeCounters } from '../db/schema';
 import { AppError } from '../errors';
 import { log } from '../log';
 import {
@@ -40,6 +40,9 @@ export interface ApplyActionInput {
   attachment?: { contentType: string; data: Buffer } | null;
   /** Reject if the order belongs to another restaurant. */
   restaurantId?: string;
+  /** A background job must not act on a status that changed after its initial read. */
+  expectedStatus?: OrderStatus;
+  expectedVersion?: number;
   now?: Date;
 }
 
@@ -51,6 +54,20 @@ export interface ApplyActionResult {
 }
 
 const AUDITED_ACTIONS: ReadonlySet<OrderAction> = new Set(['ACCEPT', 'VERIFY_PAYMENT', 'REJECT_PAYMENT', 'CANCEL', 'COMPLETE']);
+
+function duplicateResult(order: typeof orders.$inferSelect, event: typeof orderEvents.$inferSelect, input: ApplyActionInput): ApplyActionResult {
+  if (event.orderId !== order.id || event.action !== input.action || event.restaurantId !== order.restaurantId ||
+      (event.data?.reason ?? null) !== (input.payload?.reason?.trim() || null) ||
+      (event.data?.reference ?? null) !== (input.payload?.reference?.trim() || null)) {
+    throw new AppError('IDEMPOTENCY_MISMATCH', 'مفتاح الإجراء مستخدم لطلب أو بيانات مختلفة');
+  }
+  if (event.actorType !== input.actor.type || event.actorUserId !== (input.actor.userId ?? null) ||
+      !actorMayPerform(input.actor.type, input.action, event.fromStatus ?? order.status, (p) =>
+        input.actor.auth ? hasPermission(input.actor.auth, p, order.restaurantId) : false)) {
+    throw new AppError('FORBIDDEN', 'Not allowed to replay this action');
+  }
+  return { result: 'duplicate', orderId: order.id, restaurantId: order.restaurantId, status: order.status };
+}
 
 /**
  * The only way an order changes status. Validates the transition with the shared state machine,
@@ -67,8 +84,13 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
       }
 
       if (input.clientEventId) {
-        const [dup] = await tx.select({ id: orderEvents.id }).from(orderEvents).where(eq(orderEvents.clientEventId, input.clientEventId));
-        if (dup) return { result: 'duplicate' as const, orderId: order.id, restaurantId: order.restaurantId, status: order.status };
+        const [dup] = await tx.select().from(orderEvents).where(eq(orderEvents.clientEventId, input.clientEventId));
+        if (dup) return duplicateResult(order, dup, input);
+      }
+
+      if ((input.expectedStatus && order.status !== input.expectedStatus) ||
+          (input.expectedVersion !== undefined && order.version !== input.expectedVersion)) {
+        throw new AppError('INVALID_TRANSITION', 'Order changed since the background job inspected it');
       }
 
       const next = nextStatus(order.status, input.action);
@@ -79,6 +101,13 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
         input.actor.auth ? hasPermission(input.actor.auth, p, order.restaurantId) : false,
       );
       if (!permitted) throw new AppError('FORBIDDEN', 'Not allowed to perform this action');
+
+      if (input.action === 'SUBMIT_PAYMENT') {
+        const [restaurant] = await tx.select({ timeout: restaurants.unpaidTimeoutMinutes }).from(restaurants).where(eq(restaurants.id, order.restaurantId));
+        if (restaurant && restaurant.timeout > 0 && now.getTime() >= order.updatedAt.getTime() + restaurant.timeout * 60_000) {
+          throw new AppError('CONFLICT', 'انتهت مهلة الدفع، ابدأ طلبًا جديدًا');
+        }
+      }
 
       // Delivery-only staff may finish only deliveries they took.
       if (
@@ -96,6 +125,15 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
       let at = input.occurredAt ?? now;
       if (at > now) at = now;
       if (at < order.createdAt) at = order.createdAt;
+
+      // Serialize queue changes before reading the active load. Simultaneous confirmations
+      // must include the previously confirmed order in their ETA calculation.
+      const [counter] = await tx
+        .update(storeCounters)
+        .set({ eventSeq: sql`${storeCounters.eventSeq} + 1` })
+        .where(eq(storeCounters.restaurantId, order.restaurantId))
+        .returning({ eventSeq: storeCounters.eventSeq });
+      if (!counter) throw new AppError('INTERNAL', 'Restaurant counters missing');
 
       const patch: PgUpdateSetSource<typeof orders> = { status: next, updatedAt: now };
       const tsField = STATUS_TIMESTAMP_FIELD[next];
@@ -144,12 +182,6 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
       const reason = input.payload?.reason?.trim() || null;
       if (next === 'CANCELLED') patch.cancelReason = reason ?? (input.actor.type === 'CUSTOMER' ? 'ألغاه العميل' : null);
       if (reason) eventData.reason = reason;
-
-      const [counter] = await tx
-        .update(storeCounters)
-        .set({ eventSeq: sql`${storeCounters.eventSeq} + 1` })
-        .where(eq(storeCounters.restaurantId, order.restaurantId))
-        .returning({ eventSeq: storeCounters.eventSeq });
 
       await tx
         .update(orders)
@@ -220,9 +252,10 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
       return { result: 'applied' as const, orderId: order.id, restaurantId: order.restaurantId, status: next };
     });
   } catch (err) {
-    if (input.clientEventId && isUniqueViolation(err)) {
-      const [o] = await db().select({ id: orders.id, restaurantId: orders.restaurantId, status: orders.status }).from(orders).where(eq(orders.id, input.orderId));
-      if (o) return { result: 'duplicate', orderId: o.id, restaurantId: o.restaurantId, status: o.status };
+    if (input.clientEventId && isUniqueViolation(err, 'order_events_client_event_id_unique')) {
+      const [o] = await db().select().from(orders).where(eq(orders.id, input.orderId));
+      const [event] = await db().select().from(orderEvents).where(eq(orderEvents.clientEventId, input.clientEventId));
+      if (o && event && (!input.restaurantId || o.restaurantId === input.restaurantId)) return duplicateResult(o, event, input);
     }
     throw err;
   }
@@ -236,13 +269,13 @@ export async function expireUnpaidOrders(restaurantId: string, timeoutMinutes: n
   if (now.getTime() - last < 60_000 || timeoutMinutes <= 0) return 0;
   lastExpiryRun.set(restaurantId, now.getTime());
   const stale = await db()
-    .select({ id: orders.id })
+    .select({ id: orders.id, version: orders.version })
     .from(orders)
     .where(
       and(
         eq(orders.restaurantId, restaurantId),
         eq(orders.status, 'AWAITING_PAYMENT'),
-        lt(orders.createdAt, new Date(now.getTime() - timeoutMinutes * 60_000)),
+        lte(orders.updatedAt, new Date(now.getTime() - timeoutMinutes * 60_000)),
       ),
     )
     .limit(50);
@@ -253,15 +286,35 @@ export async function expireUnpaidOrders(restaurantId: string, timeoutMinutes: n
         orderId: o.id,
         action: 'CANCEL',
         actor: { type: 'SYSTEM', label: 'payment-timeout' },
+        expectedStatus: 'AWAITING_PAYMENT',
+        expectedVersion: o.version,
         payload: { reason: 'انتهت مهلة الدفع' },
         now,
       });
       cancelled++;
     } catch (err) {
-      log.warn('expire_unpaid_failed', { orderId: o.id, error: String(err) });
+      if (!(err instanceof AppError && err.code === 'INVALID_TRANSITION')) {
+        log.warn('expire_unpaid_failed', { orderId: o.id, error: String(err) });
+      }
     }
   }
   return cancelled;
+}
+
+/** Enforce the payment deadline even when the restaurant tablet is offline. */
+export async function expireUnpaidOrder(orderId: string, now = new Date()): Promise<boolean> {
+  const [row] = await db().select({ order: orders, timeout: restaurants.unpaidTimeoutMinutes }).from(orders)
+    .innerJoin(restaurants, eq(restaurants.id, orders.restaurantId)).where(eq(orders.id, orderId));
+  if (!row || row.order.status !== 'AWAITING_PAYMENT' || row.timeout <= 0 ||
+      now.getTime() < row.order.updatedAt.getTime() + row.timeout * 60_000) return false;
+  try {
+    await applyOrderAction({ orderId, action: 'CANCEL', expectedStatus: 'AWAITING_PAYMENT', expectedVersion: row.order.version,
+      actor: { type: 'SYSTEM', label: 'payment-timeout' }, payload: { reason: 'انتهت مهلة الدفع' }, now });
+    return true;
+  } catch (err) {
+    if (err instanceof AppError && err.code === 'INVALID_TRANSITION') return false;
+    throw err;
+  }
 }
 
 /** Test helper. */

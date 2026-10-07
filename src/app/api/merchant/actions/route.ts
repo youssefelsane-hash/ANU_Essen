@@ -8,7 +8,7 @@ import type { ActionResult } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-const PERMANENT = new Set(['INVALID_TRANSITION', 'FORBIDDEN', 'NOT_FOUND', 'VALIDATION']);
+const PERMANENT = new Set(['INVALID_TRANSITION', 'FORBIDDEN', 'NOT_FOUND', 'VALIDATION', 'IDEMPOTENCY_MISMATCH', 'CONFLICT']);
 
 /**
  * Offline outbox flush. Each action is applied exactly once (keyed by its client eventId).

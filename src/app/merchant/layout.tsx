@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   robots: { index: false },
   appleWebApp: { capable: true, title: 'المحل', statusBarStyle: 'default' },
 };
-export const viewport: Viewport = { themeColor: '#111827' };
+export const viewport: Viewport = { themeColor: '#172c22' };
 export const dynamic = 'force-dynamic';
 
 export default async function MerchantLayout({ children }: { children: React.ReactNode }) {
@@ -33,7 +33,7 @@ export default async function MerchantLayout({ children }: { children: React.Rea
   ];
   return (
     <div className="min-h-dvh">
-      <nav className="flex h-[52px] items-center gap-1 overflow-x-auto bg-gray-900 px-3 text-sm text-white no-scrollbar">
+      <nav aria-label="إدارة المطعم" className="merchant-nav flex items-center gap-1 overflow-x-auto px-4 text-sm text-white no-scrollbar">
         <span className="me-2 shrink-0 font-extrabold">{restaurant.nameAr}</span>
         {links.filter((l) => l.show).map((l) => (
           <Link key={l.href} href={l.href} className="shrink-0 rounded-lg px-3 py-1.5 hover:bg-white/10">{l.label}</Link>

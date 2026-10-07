@@ -3,43 +3,47 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { pageAuth } from '@/server/auth/session';
 import { logoutAction } from '@/server/actions/auth';
+import { UtensilsCrossed, LogOut, ExternalLink } from 'lucide-react';
+import { AdminNavigation } from '@/components/admin/navigation';
 
 export const metadata: Metadata = { title: 'Platform Admin', robots: { index: false } };
 export const dynamic = 'force-dynamic';
 
-const NAV: [string, string, string][] = [
-  ['/admin', 'Overview', 'platform.finance'],
-  ['/admin/restaurants', 'Restaurants', 'platform.restaurants'],
-  ['/admin/orders', 'Orders', 'platform.restaurants'],
-  ['/admin/finance', 'Commissions & settlements', 'platform.finance'],
-  ['/admin/customers', 'Customers', 'platform.restaurants'],
-  ['/admin/users', 'Users & staff', 'platform.users'],
-  ['/admin/roles', 'Roles & permissions', 'platform.users'],
-  ['/admin/audit', 'Audit log', 'platform.audit'],
-  ['/admin/settings', 'System settings', 'platform.settings'],
-];
+const NAV = [
+  { href: '/admin', label: 'Overview', permission: 'platform.finance', icon: 'LayoutDashboard' },
+  { href: '/admin/restaurants', label: 'Restaurants & branding', permission: 'platform.restaurants', icon: 'Store' },
+  { href: '/admin/orders', label: 'Orders', permission: 'platform.restaurants', icon: 'ReceiptText' },
+  { href: '/admin/finance', label: 'Finance & settlements', permission: 'platform.finance', icon: 'Wallet' },
+  { href: '/admin/customers', label: 'Customers', permission: 'platform.restaurants', icon: 'Users' },
+  { href: '/admin/users', label: 'Team members', permission: 'platform.users', icon: 'UserCog' },
+  { href: '/admin/roles', label: 'Roles & permissions', permission: 'platform.users', icon: 'ShieldCheck' },
+  { href: '/admin/audit', label: 'Activity log', permission: 'platform.audit', icon: 'ScrollText' },
+  { href: '/admin/settings', label: 'System settings', permission: 'platform.settings', icon: 'Settings' },
+] as const;
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const auth = await pageAuth('/admin');
   if (!auth.isPlatform) redirect('/merchant');
   return (
-    <div dir="ltr" lang="en" className="min-h-dvh md:flex">
-      <aside className="bg-gray-900 text-gray-100 md:sticky md:top-0 md:h-dvh md:w-60 md:shrink-0">
-        <div className="flex items-center justify-between px-4 py-4 md:block">
-          <div className="text-lg font-black">Platform Admin</div>
-          <div className="text-xs text-gray-400">{auth.user.email}</div>
+    <div dir="ltr" lang="en" className="admin-shell min-h-dvh md:flex">
+      <aside className="admin-sidebar text-gray-100 md:sticky md:top-0 md:flex md:h-dvh md:shrink-0 md:flex-col">
+        <div className="admin-brand">
+          <div className="admin-brand-mark"><UtensilsCrossed size={22} strokeWidth={1.5} /></div>
+          <div><strong>Restaurant platform</strong><small>THE CONTROL ROOM</small></div>
         </div>
-        <nav className="no-scrollbar flex gap-1 overflow-x-auto px-2 pb-2 md:block md:space-y-0.5 md:overflow-visible">
-          {NAV.filter(([, , perm]) => auth.platformPermissions.has(perm)).map(([href, label]) => (
-            <Link key={href} href={href} className="block shrink-0 rounded-lg px-3 py-2 text-sm hover:bg-white/10">{label}</Link>
-          ))}
-          <Link href="/merchant" className="block shrink-0 rounded-lg px-3 py-2 text-sm text-orange-300 hover:bg-white/10">Merchant screen →</Link>
-          <form action={logoutAction}>
-            <button className="block w-full shrink-0 rounded-lg px-3 py-2 text-start text-sm text-gray-400 hover:bg-white/10">Sign out</button>
-          </form>
+        <div className="admin-user">{auth.user.name}<div className="mt-1 opacity-60">{auth.user.email}</div></div>
+        <div className="admin-nav-label">WORKSPACE</div>
+        <nav aria-label="Platform navigation" className="no-scrollbar flex overflow-x-auto px-2 pb-3 md:block md:overflow-y-auto md:px-0">
+          <AdminNavigation items={NAV.filter(({ permission }) => auth.platformPermissions.has(permission)).map(({ href, label, icon }) => ({ href, label, icon }))} />
         </nav>
+        <div className="admin-bottom flex md:block">
+          <Link href="/merchant" className="admin-link"><ExternalLink size={17} strokeWidth={1.6} />Kitchen screen</Link>
+          <form action={logoutAction}><button className="admin-link w-auto"><LogOut size={17} strokeWidth={1.6} />Sign out</button></form>
+        </div>
       </aside>
-      <main className="min-w-0 flex-1 p-4 md:p-8">{children}</main>
+      <main className="min-w-0 flex-1 p-4 md:p-8 lg:px-10">
+        <div className="admin-content"><div className="admin-topline"><span>RESTAURANT OPERATIONS</span><Link href="/" className="flex items-center gap-2">Open customer experience <ExternalLink size={13} /></Link></div>{children}</div>
+      </main>
     </div>
   );
 }

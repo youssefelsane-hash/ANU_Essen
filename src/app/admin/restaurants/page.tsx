@@ -6,6 +6,8 @@ import { adminPage } from '@/server/admin-guard';
 import { createRestaurantAction } from '@/server/actions/admin-restaurants';
 import { ActionForm, SubmitButton } from '@/components/forms';
 import { Forbidden, PageTitle } from '@/components/admin/ui';
+import { RestaurantBrandEditor } from '@/components/admin/restaurant-brand-editor';
+import { brandTextColor } from '@/lib/domain/restaurant-brand';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,30 +16,28 @@ export default async function RestaurantsPage() {
   const list = await db().select().from(restaurants).orderBy(asc(restaurants.nameEn));
   return (
     <div className="space-y-6">
-      <PageTitle title="Restaurants" subtitle="Each restaurant gets its own menu, queue engine, payments, staff and QR codes." />
-      <section className="card overflow-x-auto">
-        <table className="table">
-          <thead><tr><th>Name</th><th>Public URL</th><th>Status</th><th>Commission</th><th>Active</th></tr></thead>
-          <tbody>
-            {list.map((r) => (
-              <tr key={r.id}>
-                <td><Link href={`/admin/restaurants/${r.id}`} className="font-semibold text-blue-700">{r.nameEn}</Link> <span className="text-gray-500">{r.nameAr}</span></td>
-                <td><a href={`/s/${r.slug}`} target="_blank" className="font-mono text-xs text-blue-700">/s/{r.slug}</a></td>
-                <td>{r.orderingStatus}</td>
-                <td>{(r.commissionBps / 100).toFixed(2)}%</td>
-                <td>{r.isActive ? '✓' : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      <PageTitle title="Restaurant portfolio" subtitle="Independent brands, menus, payments and teams — managed in one place." />
+      <div className="grid gap-4 xl:grid-cols-2">
+        {list.map((r) => (
+          <article key={r.id} className="card space-y-5">
+            <div className="flex items-start gap-4">
+              <div className="grid min-h-16 min-w-16 max-w-24 place-items-center rounded-2xl px-3 py-4 text-center text-sm font-bold" style={{ backgroundColor: r.brandColor, color: brandTextColor(r.brandColor) }} dir="auto">{r.badgeText || r.nameAr.slice(0, 1)}</div>
+              <div className="min-w-0 flex-1"><Link href={`/admin/restaurants/${r.id}`} className="text-lg font-bold text-gray-900">{r.nameEn}</Link><p className="mt-1 text-sm text-gray-500" dir="rtl">{r.nameAr}</p></div>
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${r.isActive && r.orderingStatus === 'OPEN' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>{!r.isActive ? 'Inactive' : r.orderingStatus === 'OPEN' ? 'Open' : r.orderingStatus === 'PAUSED' ? 'Paused' : 'Closed'}</span>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4 text-sm"><span className="text-gray-500">Commission <strong className="text-gray-800">{(r.commissionBps / 100).toFixed(2)}%</strong></span><a href={`/s/${r.slug}`} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-emerald-700">/s/{r.slug} ↗</a></div>
+            <div className="flex flex-wrap gap-2"><Link href={`/admin/restaurants/${r.id}`} className="btn btn-primary btn-sm">Manage brand</Link><Link href={`/admin/restaurants/${r.id}/menu`} className="btn btn-secondary btn-sm">Menu</Link><Link href={`/admin/restaurants/${r.id}/marketing`} className="btn btn-secondary btn-sm">QR & posters</Link></div>
+          </article>
+        ))}
+        {!list.length && <div className="card py-10 text-center text-gray-500">Create your first restaurant below.</div>}
+      </div>
       <section className="card">
-        <h2 className="mb-3 font-bold">New restaurant</h2>
-        <ActionForm action={createRestaurantAction} className="grid gap-3 md:grid-cols-4">
-          <input name="nameAr" placeholder="Name (Arabic)" required className="input" dir="rtl" />
-          <input name="nameEn" placeholder="Name (English)" required className="input" />
-          <input name="slug" placeholder="url-slug (optional)" className="input" />
-          <SubmitButton>Create</SubmitButton>
+        <h2 className="mb-1 font-bold">Add a restaurant</h2>
+        <p className="mb-5 text-sm text-gray-500">Start with its identity. Configure the menu, delivery points and staff after creation.</p>
+        <ActionForm action={createRestaurantAction} className="max-w-3xl space-y-4">
+          <RestaurantBrandEditor />
+          <label className="block"><span className="label">Public menu slug · optional</span><input name="slug" placeholder="al-raya" maxLength={48} className="input" dir="ltr" /></label>
+          <SubmitButton>Create restaurant</SubmitButton>
         </ActionForm>
         <p className="mt-2 text-xs text-gray-500">Created with the default queue config &amp; commission from System settings. Cash is enabled; configure InstaPay before enabling it.</p>
       </section>
