@@ -5,6 +5,8 @@ import { notFound } from 'next/navigation';
 import { db } from '@/server/db';
 import { loadPublicMenu } from '@/server/services/menu';
 import { StoreMenu } from '@/components/customer/store-menu';
+import { SiteFooter } from '@/components/site-footer';
+import { getPlatformProfile } from '@/server/platform-profile';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +32,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 }
 
 export default async function StorePage({ params }: { params: Promise<{ slug: string }> }) {
-  const menu = await loadPublicMenu(db(), (await params).slug);
+  const [menu, profile, locale] = await Promise.all([loadPublicMenu(db(), (await params).slug), getPlatformProfile(), getLocale('customer')]);
   if (!menu) notFound();
-  return <StoreMenu key={menu.restaurant.id} menu={menu} />;
+  return (
+    <>
+      <StoreMenu key={menu.restaurant.id} menu={menu} orderAhead={{ ar: profile.orderAheadAr, en: profile.orderAheadEn }} />
+      <SiteFooter locale={locale} className="with-cart-bar" />
+    </>
+  );
 }

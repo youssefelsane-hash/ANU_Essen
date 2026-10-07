@@ -5,7 +5,7 @@ import { useLanguage } from '@/components/language-provider';
 import { LanguageSwitcher } from '@/components/language-switcher';
 import { localizedName } from '@/lib/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRight, Clock3, Check, ChefHat, Bike, MapPin, ShoppingBag, Copy, CheckCheck, RefreshCw, Phone, UtensilsCrossed, AlertCircle, X, Paperclip, Store } from 'lucide-react';
+import { ArrowRight, Clock3, Check, ChefHat, Bike, MapPin, ShoppingBag, Copy, CheckCheck, RefreshCw, Phone, UtensilsCrossed, AlertCircle, X, Paperclip, Store, RotateCcw } from 'lucide-react';
 import { customerMessage } from './messages';
 import './tracking.css';
 import { formatMoney, formatTime } from '@/lib/domain/misc';
@@ -55,6 +55,10 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
   const pickup = o.fulfillment === 'PICKUP';
   const steps = pickup ? pickupStepsFor(t) : stepsFor(t);
   const done = isTerminal(o.status);
+  const refunds = o.refunds ?? [];
+  const openRefund = refunds.find((r) => r.status === 'REQUESTED');
+  // Keep listening after the order finished while the restaurant reviews a refund request.
+  const live = !done || !!openRefund;
   const inFlight = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -80,12 +84,12 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
 
   // Polling sync (the reliable channel): fast while visible, slow in background, stops when finished.
   useEffect(() => {
-    if (done) return;
+    if (!live) return;
     let timer: ReturnType<typeof setTimeout>;
     let stopped = false;
     const loop = async () => {
       await refresh();
-      if (!stopped) timer = setTimeout(loop, document.visibilityState === 'visible' ? 4000 : 15000);
+      if (!stopped) timer = setTimeout(loop, done ? 20000 : document.visibilityState === 'visible' ? 4000 : 15000);
     };
     timer = setTimeout(loop, 3000);
     const onVisible = () => document.visibilityState === 'visible' && refresh();
@@ -101,7 +105,7 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
       window.removeEventListener('focus', refresh);
       window.removeEventListener('pageshow', refresh);
     };
-  }, [done, refresh, initial.serverTime]);
+  }, [live, done, refresh, initial.serverTime]);
 
   // A ready pickup order isn't counting down any more: it's waiting at the counter.
   const inQueue = ['CONFIRMED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'].includes(o.status) && !(pickup && o.status === 'READY');
@@ -163,8 +167,10 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
         {o.deliveryFee > 0 && <div className="tracking-bill-row"><span>{t("التوصيل", "Delivery")}</span><span>{formatMoney(o.deliveryFee, locale)}</span></div>}
         {o.discountTotal > 0 && <div className="tracking-bill-row is-discount"><span>{t("الخصم", "Discount")}</span><span>− {formatMoney(o.discountTotal, locale)}</span></div>}
         <div className="tracking-total"><span>{t("الإجمالي", "Total")}</span><strong>{formatMoney(o.total, locale)}</strong></div>
+        {o.refundedTotal > 0 && <div className="tracking-bill-row is-discount"><span>{o.paymentStatus === 'REFUNDED' ? t("اترجعلك المبلغ كله", "Fully refunded to you") : t("اترجعلك", "Refunded to you")}</span><span>{formatMoney(o.refundedTotal, locale)}</span></div>}
         <div className="tracking-payment-method"><span>{o.paymentMethod === 'INSTAPAY' ? t('إنستاباي', 'InstaPay') : t("كاش عند الاستلام", "Cash on pickup")}</span>{o.paymentStatus === 'PAYMENT_VERIFIED' && <span><CheckCheck size={14} />{t("تم تأكيد الدفع", "Payment verified")}</span>}</div>
       </section>
+      <RefundStatus refunds={refunds} canRequest={o.canRequestRefund} paymentMethod={o.paymentMethod} token={token} onDone={refresh} />
       {view.restaurant.phone && <a href={`tel:${view.restaurant.phone}`} className="tracking-contact"><Phone size={19} /><span><strong>{t("محتاج مساعدة في طلبك؟", "Need help with your order?")}</strong><small>{t("كلم المطعم مباشرة", "Call the restaurant directly")}</small></span><ArrowRight className="directional-arrow" size={17} /></a>}
       {(o.status === 'AWAITING_PAYMENT' || o.status === 'CREATED') && <CancelButton token={token} onDone={refresh} />}
       <p className="tracking-privacy">{t("رابط المتابعة خاص بطلبك. شاركه مع شخص تثق به فقط.", "This tracking link is private. Share it only with someone you trust.")}</p>
@@ -301,6 +307,53 @@ function PaymentCard({ view, token, now, onSubmitted }: { view: TrackingView; to
       )}
     </section>
   );
+}
+
+function RefundStatus({ refunds, canRequest, paymentMethod, token, onDone }: { refunds: TrackingView['order']['refunds']; canRequest: boolean; paymentMethod: 'CASH' | 'INSTAPAY'; token: string; onDone: () => void }) {
+  const { locale, t } = useLanguage();
+  const open = refunds.find((r) => r.status === 'REQUESTED');
+  const last = refunds[refunds.length - 1];
+  return <>
+    {open && <section className="tracking-state-card" role="status"><div className="tracking-state-icon"><RotateCcw size={22} /></div><div><h2>{t("طلب الاسترجاع وصل للمطعم", "The restaurant received your refund request")}</h2><p>{t("هيراجعوه ويرجعولك الفلوس أو يردوا عليك هنا.", "They will review it and refund you or reply here.")}</p></div></section>}
+    {!open && last?.status === 'REJECTED' && <section className="tracking-state-card is-cancelled"><AlertCircle size={22} /><div><h2>{t("المطعم رفض طلب الاسترجاع", "The restaurant declined the refund request")}</h2>{last.decisionNote && <p>{last.decisionNote}</p>}</div></section>}
+    {!open && last?.status === 'COMPLETED' && <section className="tracking-state-card"><div className="tracking-state-icon"><CheckCheck size={22} /></div><div><h2>{t("اترجعلك ", "Refunded ")}{formatMoney(last.amount, locale)}</h2><p>{last.method === 'INSTAPAY' ? t("على إنستاباي", "via InstaPay") : t("كاش من المطعم", "in cash at the restaurant")}{last.decisionNote ? ` — ${last.decisionNote}` : ''}</p></div></section>}
+    {canRequest && <RefundRequestButton token={token} paymentMethod={paymentMethod} onDone={onDone} />}
+  </>;
+}
+
+function RefundRequestButton({ token, paymentMethod, onDone }: { token: string; paymentMethod: 'CASH' | 'INSTAPAY'; onDone: () => void }) {
+  const { locale, t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [payout, setPayout] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/public/orders/${token}/refund-request`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason, payoutDetails: payout || null }), signal: AbortSignal.timeout(10000) });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error?.message || t("تعذّر إرسال الطلب. جرّب تاني.", "We couldn't send the request. Please try again."));
+      } else {
+        setOpen(false);
+      }
+    } catch { setError(t("النت ضعيف — حاول تاني", "The connection is unstable. Please try again.")); }
+    setBusy(false);
+    onDone();
+  }
+  if (!open) return <button className="btn btn-ghost w-full" onClick={() => setOpen(true)}><RotateCcw size={16} />{t("في مشكلة؟ اطلب استرجاع فلوسك", "Problem? Ask for a refund")}</button>;
+  return <form className="card space-y-3" onSubmit={submit}>
+    <h2 className="font-bold">{t("طلب استرجاع", "Refund request")}</h2>
+    <label className="block"><span className="label">{t("إيه اللي حصل؟", "What went wrong?")}</span><textarea className="input" rows={3} required minLength={3} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("مثلاً: صنف ناقص أو الأكل وصل بارد", "e.g. a missing item or the food arrived cold")} /></label>
+    {paymentMethod === 'INSTAPAY'
+      ? <label className="block"><span className="label">{t("ترجعلك الفلوس على (عنوان إنستاباي أو رقم المحفظة) — اختياري", "Where to send the money (InstaPay address or wallet number) — optional")}</span><input className="input" dir="ltr" maxLength={120} value={payout} onChange={(e) => setPayout(e.target.value)} /></label>
+      : <p className="text-xs text-gray-600">{t("الطلب اتدفع كاش، فالمطعم هيرجعلك الفلوس كاش أو يتواصل معاك.", "This order was paid in cash, so the restaurant will refund you in cash or contact you.")}</p>}
+    <div className="flex gap-2"><button type="button" className="btn btn-secondary flex-1" disabled={busy} onClick={() => setOpen(false)}>{t("رجوع", "Back")}</button><button className="btn btn-primary flex-1" disabled={busy || reason.trim().length < 3}>{busy ? t("جاري الإرسال…", "Sending…") : t("إرسال للمطعم", "Send to restaurant")}</button></div>
+    {error && <p className="text-xs text-red-700" role="alert">{customerMessage(error, locale)}</p>}
+  </form>;
 }
 
 function CancelButton({ token, onDone }: { token: string; onDone: () => void }) {

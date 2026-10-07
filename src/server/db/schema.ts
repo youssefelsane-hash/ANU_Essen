@@ -43,6 +43,7 @@ export const roleScopeEnum = pgEnum('role_scope', ['PLATFORM', 'STORE']);
 export const promotionTypeEnum = pgEnum('promotion_type', PROMOTION_TYPES);
 export const actorTypeEnum = pgEnum('actor_type', ['CUSTOMER', 'USER', 'SYSTEM']);
 export const fulfillmentEnum = pgEnum('fulfillment', FULFILLMENTS);
+export const refundStatusEnum = pgEnum('refund_status', ['REQUESTED', 'COMPLETED', 'REJECTED']);
 export const orderChannelEnum = pgEnum('order_channel', ORDER_CHANNELS);
 
 // ---------------------------------------------------------------- identity & RBAC
@@ -431,6 +432,8 @@ export const orders = pgTable(
     deliveryPointId: uuid('delivery_point_id').references(() => deliveryPoints.id, { onDelete: 'set null' }),
     deliveryPointName: text('delivery_point_name').notNull(),
     fulfillment: fulfillmentEnum('fulfillment').notNull().default('DELIVERY'),
+    /** Sum of completed refunds (piasters). */
+    refundedTotal: integer('refunded_total').notNull().default(0),
     channel: orderChannelEnum('channel').notNull().default('ONLINE'),
     /** Staff member who entered a counter order. */
     createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
@@ -582,6 +585,60 @@ export const paymentAttachments = pgTable('payment_attachments', {
   data: bytea('data').notNull(),
   createdAt: createdAt(),
 });
+
+/**
+ * Refunds are a ledger: money goes back to the customer outside the platform (InstaPay / cash),
+ * staff record it here. A customer can also request one from the tracking page (REQUESTED).
+ */
+export const refunds = pgTable(
+  'refunds',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    status: refundStatusEnum('status').notNull(),
+    amount: integer('amount').notNull(),
+    /** INSTAPAY / CASH — how the money went back. */
+    method: paymentMethodEnum('method'),
+    /** Customer's reason (request) or staff reason. */
+    reason: text('reason'),
+    /** Where the customer wants the money (e.g. their InstaPay address / phone). */
+    payoutDetails: text('payout_details'),
+    /** Staff transfer reference. */
+    reference: text('reference'),
+    decisionNote: text('decision_note'),
+    /** Platform commission given back for this refund (snapshot, piasters). */
+    commissionReversed: integer('commission_reversed').notNull().default(0),
+    requestedByCustomer: boolean('requested_by_customer').notNull().default(false),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    decidedByUserId: uuid('decided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    decidedAt: ts('decided_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('refunds_order_idx').on(t.orderId), index('refunds_restaurant_status_idx').on(t.restaurantId, t.status)],
+);
+
+/** Images uploaded by restaurants (product photos). Small, compressed on the phone before upload. */
+export const media = pgTable(
+  'media',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    data: bytea('data').notNull(),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('media_restaurant_idx').on(t.restaurantId)],
+);
 
 export const promotionUsages = pgTable(
   'promotion_usages',

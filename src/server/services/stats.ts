@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db';
-import { orders, restaurants, settlements, users } from '../db/schema';
+import { orders, refunds, restaurants, settlements, users } from '../db/schema';
 import { ACTIVE_STATUSES, type OrderStatus } from '../../lib/domain/order-machine';
 
 const money = (col: unknown) => sql<number>`coalesce(sum(${col}), 0)::float8`;
@@ -9,14 +9,48 @@ export interface PeriodStats {
   orders: number;
   completed: number;
   cancelled: number;
+  /** Net of refunds. */
   sales: number;
+  grossSales: number;
+  refunds: number;
+  refundCount: number;
   discounts: number;
   commission: number;
   merchantNet: number;
   avgOrder: number;
 }
 
-/** Sales are recognised when an order is COMPLETED; order counts by creation time. */
+interface RefundTotals { restaurantId: string; count: number; amount: number; commissionReversed: number }
+
+/**
+ * Money given back on COMPLETED orders (refunds of cancelled orders were never counted as sales).
+ * A refund is recognised at the later of the refund and the order completion, so it always lands in
+ * the same or a later period than the sale it reduces.
+ */
+async function refundTotals(d: Db, range: { from: Date; to: Date } | null, restaurantId?: string): Promise<RefundTotals[]> {
+  const at = sql`greatest(${refunds.decidedAt}, ${orders.completedAt})`;
+  const rows = await d
+    .select({
+      restaurantId: refunds.restaurantId,
+      count: sql<number>`count(*)::int`,
+      amount: money(refunds.amount),
+      commissionReversed: money(refunds.commissionReversed),
+    })
+    .from(refunds)
+    .innerJoin(orders, eq(orders.id, refunds.orderId))
+    .where(and(
+      eq(refunds.status, 'COMPLETED'),
+      eq(orders.status, 'COMPLETED'),
+      ...(range ? [sql`${at} >= ${range.from.toISOString()}::timestamptz`, sql`${at} < ${range.to.toISOString()}::timestamptz`] : []),
+      ...(restaurantId ? [eq(refunds.restaurantId, restaurantId)] : []),
+    ))
+    .groupBy(refunds.restaurantId);
+  return rows.map((r) => ({ restaurantId: r.restaurantId, count: Number(r.count), amount: Number(r.amount), commissionReversed: Number(r.commissionReversed) }));
+}
+
+const sumRefunds = (rows: RefundTotals[]) => rows.reduce((a, r) => ({ count: a.count + r.count, amount: a.amount + r.amount, commissionReversed: a.commissionReversed + r.commissionReversed }), { count: 0, amount: 0, commissionReversed: 0 });
+
+/** Sales are recognised when an order is COMPLETED (net of refunds); order counts by creation time. */
 export async function periodStats(d: Db, from: Date, to: Date, restaurantId?: string): Promise<PeriodStats> {
   const scope: SQL[] = restaurantId ? [eq(orders.restaurantId, restaurantId)] : [];
   const [created] = await d
@@ -36,17 +70,21 @@ export async function periodStats(d: Db, from: Date, to: Date, restaurantId?: st
     })
     .from(orders)
     .where(and(eq(orders.status, 'COMPLETED'), gte(orders.completedAt, from), lt(orders.completedAt, to), ...scope));
+  const refunded = sumRefunds(await refundTotals(d, { from, to }, restaurantId));
   const completed = Number(done.completed);
-  const sales = Number(done.sales);
+  const grossSales = Number(done.sales);
   return {
     orders: Number(created.orders),
     cancelled: Number(created.cancelled),
     completed,
-    sales,
+    sales: grossSales - refunded.amount,
+    grossSales,
+    refunds: refunded.amount,
+    refundCount: refunded.count,
     discounts: Number(done.discounts),
-    commission: Number(done.commission),
-    merchantNet: Number(done.merchantNet),
-    avgOrder: completed ? Math.round(sales / completed) : 0,
+    commission: Number(done.commission) - refunded.commissionReversed,
+    merchantNet: Number(done.merchantNet) - (refunded.amount - refunded.commissionReversed),
+    avgOrder: completed ? Math.round(grossSales / completed) : 0,
   };
 }
 
@@ -65,13 +103,17 @@ export interface RestaurantFinance {
   nameAr: string;
   nameEn: string;
   commissionBps: number;
-  period: { completed: number; sales: number; discounts: number; commission: number; merchantNet: number };
+  /** sales / commission / merchantNet are net of refunds. */
+  period: { completed: number; sales: number; refunds: number; discounts: number; commission: number; merchantNet: number };
   allTime: { sales: number; commission: number; paid: number; outstanding: number };
 }
 
-/** Platform commission ledger: commission is accrued from completed orders' snapshots; settlements are payments received. */
+/**
+ * Platform commission ledger: commission is accrued from completed orders' snapshots, minus the share
+ * given back with refunds; settlements are payments received.
+ */
 export async function financeByRestaurant(d: Db, from: Date, to: Date): Promise<RestaurantFinance[]> {
-  const [list, period, allTime, paid] = await Promise.all([
+  const [list, period, allTime, paid, periodRefunds, allRefunds] = await Promise.all([
     d.select().from(restaurants).orderBy(asc(restaurants.nameAr)),
     d
       .select({
@@ -91,12 +133,16 @@ export async function financeByRestaurant(d: Db, from: Date, to: Date): Promise<
       .where(eq(orders.status, 'COMPLETED'))
       .groupBy(orders.restaurantId),
     d.select({ restaurantId: settlements.restaurantId, paid: money(settlements.amountPaid) }).from(settlements).groupBy(settlements.restaurantId),
+    refundTotals(d, { from, to }),
+    refundTotals(d, null),
   ]);
   return list.map((r) => {
     const p = period.find((x) => x.restaurantId === r.id);
     const a = allTime.find((x) => x.restaurantId === r.id);
     const s = paid.find((x) => x.restaurantId === r.id);
-    const commission = Number(a?.commission ?? 0);
+    const pr = periodRefunds.find((x) => x.restaurantId === r.id) ?? { amount: 0, commissionReversed: 0 };
+    const ar = allRefunds.find((x) => x.restaurantId === r.id) ?? { amount: 0, commissionReversed: 0 };
+    const commission = Number(a?.commission ?? 0) - ar.commissionReversed;
     const paidAmount = Number(s?.paid ?? 0);
     return {
       restaurantId: r.id,
@@ -105,12 +151,13 @@ export async function financeByRestaurant(d: Db, from: Date, to: Date): Promise<
       commissionBps: r.commissionBps,
       period: {
         completed: Number(p?.completed ?? 0),
-        sales: Number(p?.sales ?? 0),
+        sales: Number(p?.sales ?? 0) - pr.amount,
+        refunds: pr.amount,
         discounts: Number(p?.discounts ?? 0),
-        commission: Number(p?.commission ?? 0),
-        merchantNet: Number(p?.merchantNet ?? 0),
+        commission: Number(p?.commission ?? 0) - pr.commissionReversed,
+        merchantNet: Number(p?.merchantNet ?? 0) - (pr.amount - pr.commissionReversed),
       },
-      allTime: { sales: Number(a?.sales ?? 0), commission, paid: paidAmount, outstanding: commission - paidAmount },
+      allTime: { sales: Number(a?.sales ?? 0) - ar.amount, commission, paid: paidAmount, outstanding: commission - paidAmount },
     };
   });
 }

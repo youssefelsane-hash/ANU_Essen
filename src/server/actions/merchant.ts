@@ -47,6 +47,8 @@ export async function setProductAvailability(productId: string, available: boole
     ...(await requestMeta()),
   });
   revalidatePath('/merchant/menu');
+  revalidatePath('/merchant/menu/manage');
+  revalidatePath(`/admin/restaurants/${p.restaurantId}/menu`);
 }
 
 export async function setVariantAvailability(variantId: string, available: boolean) {
@@ -65,6 +67,7 @@ export async function setVariantAvailability(variantId: string, available: boole
     after: { isAvailable: available },
   });
   revalidatePath('/merchant/menu');
+  revalidatePath('/merchant/menu/manage');
 }
 
 export async function setAddonAvailability(addonId: string, available: boolean) {
@@ -86,6 +89,7 @@ export async function setAddonAvailability(addonId: string, available: boolean) 
     after: { isAvailable: available },
   });
   revalidatePath('/merchant/menu');
+  revalidatePath('/merchant/menu/manage');
 }
 
 export async function updatePriceAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
@@ -119,6 +123,7 @@ export async function updatePriceAction(_prev: ActionState, fd: FormData): Promi
       ...(await requestMeta()),
     });
     revalidatePath('/merchant/menu');
+    revalidatePath('/merchant/menu/manage');
     return 'تم تحديث السعر';
   });
 }

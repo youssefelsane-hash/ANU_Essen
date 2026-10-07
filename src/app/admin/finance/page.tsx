@@ -50,7 +50,8 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
         </form>
       </PageTitle>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label={t("مبيعات الفترة", "Gross sales (period)")} value={m(sum((r) => r.period.sales))} />
+        <Stat label={t("مبيعات الفترة (بعد المرتجعات)", "Sales after refunds (period)")} value={m(sum((r) => r.period.sales))} />
+        <Stat label={t("مرتجعات الفترة", "Refunds (period)")} value={m(sum((r) => r.period.refunds))} />
         <Stat label={t("عمولة الفترة", "Platform commission (period)")} value={m(sum((r) => r.period.commission))} />
         <Stat label={t("إجمالي ما تم تحصيله", "Commission paid (all time)")} value={m(sum((r) => r.allTime.paid))} />
         <Stat label={t("عمولة مستحقة", "Commission outstanding")} value={m(sum((r) => r.allTime.outstanding))} />
@@ -58,7 +59,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
       <section className="card overflow-x-auto">
         <h2 className="mb-2 font-bold">{t("حسب المطعم", "By restaurant")}</h2>
         <table className="table">
-          <thead><tr><th>{t("المطعم", "Restaurant")}</th><th>{t("النسبة", "Rate")}</th><th>{t("تم التسليم", "Completed")}</th><th>{t("المبيعات", "Gross sales")}</th><th>{t("الخصومات", "Discounts")}</th><th>{t("العمولة", "Commission")}</th><th>{t("صافي المطعم", "Merchant net")}</th><th>{t("إجمالي العمولة", "All-time commission")}</th><th>{t("تم تحصيله", "Paid")}</th><th>{t("المستحق", "Outstanding")}</th></tr></thead>
+          <thead><tr><th>{t("المطعم", "Restaurant")}</th><th>{t("النسبة", "Rate")}</th><th>{t("تم التسليم", "Completed")}</th><th>{t("المبيعات", "Sales")}</th><th>{t("المرتجع", "Refunded")}</th><th>{t("الخصومات", "Discounts")}</th><th>{t("العمولة", "Commission")}</th><th>{t("صافي المطعم", "Merchant net")}</th><th>{t("إجمالي العمولة", "All-time commission")}</th><th>{t("تم تحصيله", "Paid")}</th><th>{t("المستحق", "Outstanding")}</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.restaurantId}>
@@ -66,6 +67,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
                 <td>{(r.commissionBps / 100).toFixed(2)}%</td>
                 <td>{r.period.completed}</td>
                 <td>{m(r.period.sales)}</td>
+                <td>{r.period.refunds ? m(r.period.refunds) : '—'}</td>
                 <td>{m(r.period.discounts)}</td>
                 <td className="font-semibold">{m(r.period.commission)}</td>
                 <td>{m(r.period.merchantNet)}</td>

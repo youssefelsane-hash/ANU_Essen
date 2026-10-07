@@ -1,128 +1,32 @@
 import { getLocale } from '@/lib/i18n/server';
 import { text, localizedName } from '@/lib/i18n';
-import Link from 'next/link';
-import { asc, eq, inArray } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 import { db } from '@/server/db';
-import { addonGroups, addons, categories, products, productVariants } from '@/server/db/schema';
 import { adminPage } from '@/server/admin-guard';
+import { can } from '@/server/auth/authz';
 import { getRestaurant } from '@/server/services/store';
-import { saveAddonGroupAction, saveCategoryAction, setProductActiveAction } from '@/server/actions/admin-restaurants';
-import { setProductAvailability } from '@/server/actions/merchant';
-import { ActionForm, SubmitButton } from '@/components/forms';
-import { RowsEditor } from '@/components/admin/editors';
+import { MenuManager } from '@/components/menu/menu-manager';
 import { Forbidden, PageTitle, RestaurantTabs } from '@/components/admin/ui';
-import { formatMoney } from '@/lib/domain/misc';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminMenuPage({ params }: { params: Promise<{ id: string }> }) {
   const locale = await getLocale();
-  const t = (ar: string, en: string) => text(locale, ar, en);
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
-  if (!(await adminPage(`/admin/restaurants/${id}/menu`, 'platform.restaurants'))) return <Forbidden />;
+  const auth = await adminPage(`/admin/restaurants/${id}/menu`, 'platform.restaurants');
+  if (!auth) return <Forbidden />;
   const r = await getRestaurant(db(), id);
   if (!r) notFound();
-  const [cats, prods, groups] = await Promise.all([
-    db().select().from(categories).where(eq(categories.restaurantId, id)).orderBy(asc(categories.sortOrder)),
-    db().select().from(products).where(eq(products.restaurantId, id)).orderBy(asc(products.sortOrder)),
-    db().select().from(addonGroups).where(eq(addonGroups.restaurantId, id)).orderBy(asc(addonGroups.sortOrder)),
-  ]);
-  const variants = prods.length ? await db().select().from(productVariants).where(inArray(productVariants.productId, prods.map((p) => p.id))) : [];
-  const addonRows = groups.length ? await db().select().from(addons).where(inArray(addons.groupId, groups.map((g) => g.id))).orderBy(asc(addons.sortOrder)) : [];
-
   return (
     <div>
-      <PageTitle title={`${localizedName(locale, r.nameAr, r.nameEn)} — ${t("المنيو", "Menu")}`}>
-        <Link href={`/admin/restaurants/${id}/menu/products/new`} className="btn btn-primary btn-sm">{t("+ إضافة منتج", "+ New product")}</Link>
-      </PageTitle>
+      <PageTitle
+        title={`${localizedName(locale, r.nameAr, r.nameEn)} — ${text(locale, 'المنيو', 'Menu')}`}
+        subtitle={text(locale, 'صاحب ومدير المطعم يقدروا يعدلوا المنيو ده بنفسهم من شاشة المطعم.', 'The restaurant owner and manager can edit this menu themselves from the restaurant screen.')}
+      />
       <RestaurantTabs id={id} active="menu" />
-      <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
-        <section className="card overflow-x-auto">
-          <h2 className="mb-2 font-bold">{t("المنتجات", "Products")}</h2>
-          <table className="table">
-            <thead><tr><th>{t("المنتج", "Product")}</th><th>{t("القسم", "Category")}</th><th>{t("السعر", "Price")}</th><th>{t("جهد التحضير", "Load units")}</th><th>{t("الحالة", "Status")}</th></tr></thead>
-            <tbody>
-              {prods.map((p) => {
-                const category = cats.find((c) => c.id === p.categoryId);
-                const vs = variants.filter((v) => v.productId === p.id);
-                return (
-                  <tr key={p.id} className={p.isActive ? '' : 'opacity-50'}>
-                    <td><Link className="font-semibold text-blue-700" href={`/admin/restaurants/${id}/menu/products/${p.id}`}>{localizedName(locale, p.nameAr, p.nameEn)}</Link></td>
-                    <td>{localizedName(locale, category?.nameAr, category?.nameEn)}</td>
-                    <td>{vs.length ? vs.map((v) => `${localizedName(locale, v.nameAr, v.nameEn)} ${formatMoney(v.price, locale)}`).join(' · ') : formatMoney(p.basePrice, locale)}</td>
-                    <td>{p.prepLoadUnits}</td>
-                    <td>
-                      <div className="flex flex-wrap gap-1">
-                        {p.isActive && (
-                          <form action={setProductAvailability.bind(null, p.id, !p.isAvailable)}>
-                            <button className={`btn btn-sm ${p.isAvailable ? 'btn-success' : 'btn-secondary'}`} title={t("تغيير التوفر — يظهر فورًا للعميل", "Toggle availability (customers see it instantly)")}>{p.isAvailable ? t("متاح", "Available") : t("غير متاح", "Unavailable")}</button>
-                          </form>
-                        )}
-                        <form action={setProductActiveAction.bind(null, p.id, !p.isActive)}>
-                          <button className="btn btn-ghost btn-sm">{p.isActive ? t("إخفاء", "Archive") : t("إظهار", "Restore")}</button>
-                        </form>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </section>
-        <div className="space-y-6">
-          <section className="card">
-            <h2 className="mb-3 font-bold">{t("الأقسام", "Categories")}</h2>
-            <div className="space-y-2">
-              {[...cats, null].map((c, i) => (
-                <ActionForm key={c?.id ?? `new-${i}`} action={saveCategoryAction} className="grid grid-cols-[1fr_1fr_60px] items-center gap-2">
-                  <input type="hidden" name="restaurantId" value={id} />
-                  <input type="hidden" name="id" value={c?.id ?? ''} />
-                  <input aria-label={t("الاسم بالعربي", "Name in Arabic")} name="nameAr" defaultValue={c?.nameAr ?? ''} placeholder={t("الاسم بالعربي", "Name in Arabic")} className="input py-1" dir="rtl" required />
-                  <input aria-label={t("الاسم بالإنجليزي", "Name in English")} name="nameEn" defaultValue={c?.nameEn ?? ''} placeholder={t("إنجليزي", "English")} className="input py-1" required />
-                  <input name="sortOrder" defaultValue={c?.sortOrder ?? cats.length + 1} className="input py-1" aria-label={t("ترتيب العرض", "Sort")} />
-                  <label className="flex items-center gap-1 text-xs"><input type="checkbox" name="isActive" defaultChecked={c?.isActive ?? true} /> {t("ظاهر للعميل", "visible")}</label>
-                  <SubmitButton className="btn btn-secondary btn-sm col-span-2">{c ? t("حفظ", "Save") : t("إضافة قسم", "Add category")}</SubmitButton>
-                </ActionForm>
-              ))}
-            </div>
-          </section>
-          <section className="card">
-            <h2 className="mb-3 font-bold">{t("مجموعات الإضافات", "Addon groups")}</h2>
-            <div className="space-y-4">
-              {[...groups, null].map((g, i) => (
-                <ActionForm key={g?.id ?? `new-${i}`} action={saveAddonGroupAction} className="space-y-2 rounded-xl bg-gray-50 p-3">
-                  <input type="hidden" name="restaurantId" value={id} />
-                  <input type="hidden" name="id" value={g?.id ?? ''} />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input aria-label={t("الاسم بالعربي", "Name in Arabic")} name="nameAr" defaultValue={g?.nameAr ?? ''} placeholder={t("اسم المجموعة بالعربي", "Group name in Arabic")} className="input py-1" dir="rtl" required />
-                    <input aria-label={t("الاسم بالإنجليزي", "Name in English")} name="nameEn" defaultValue={g?.nameEn ?? ''} placeholder={t("اسم المجموعة بالإنجليزي", "Group name")} className="input py-1" required />
-                    <label className="text-xs">{t("أقل عدد اختيارات", "Min select")} <input aria-label={t("أقل عدد اختيارات", "Minimum selections")} name="minSelect" defaultValue={g?.minSelect ?? 0} className="input py-1" /></label>
-                    <label className="text-xs">{t("أقصى اختيارات — صفر بلا حد", "Max select (0 = no limit)")} <input aria-label={t("أقصى عدد اختيارات", "Maximum selections")} name="maxSelect" defaultValue={g?.maxSelect ?? 1} className="input py-1" /></label>
-                  </div>
-                  <input type="hidden" name="sortOrder" value={g?.sortOrder ?? groups.length + 1} />
-                  <label className="flex items-center gap-1 text-xs"><input type="checkbox" name="isActive" defaultChecked={g?.isActive ?? true} /> {t("نشط", "active")}</label>
-                  <RowsEditor
-                    name="addons"
-                    addLabel={t("إضافة اختيار", "Add option")}
-                    columns={[
-                      { key: 'nameAr', label: t('عربي', 'Arabic'), type: 'text', dir: 'rtl' },
-                      { key: 'nameEn', label: t('إنجليزي', 'English'), type: 'text' },
-                      { key: 'price', label: t('جنيه', 'EGP'), type: 'number', width: '80px' },
-                      { key: 'isAvailable', label: t("متاح", "On"), type: 'checkbox', width: '40px' },
-                    ]}
-                    initial={addonRows.filter((a) => a.groupId === g?.id).map((a) => ({ id: a.id, nameAr: a.nameAr, nameEn: a.nameEn, price: String(a.price / 100), isAvailable: a.isAvailable }))}
-                    blank={{ nameAr: '', nameEn: '', price: '0', isAvailable: true }}
-                  />
-                  <SubmitButton className="btn btn-secondary btn-sm">{g ? t("حفظ المجموعة", "Save group") : t("إضافة مجموعة", "Add group")}</SubmitButton>
-                </ActionForm>
-              ))}
-            </div>
-          </section>
-        </div>
-      </div>
+      <MenuManager restaurantId={id} basePath={`/admin/restaurants/${id}/menu`} showLoad={can(auth, 'platform.queue')} />
     </div>
   );
 }

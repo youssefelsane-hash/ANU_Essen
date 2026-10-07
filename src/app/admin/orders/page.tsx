@@ -2,6 +2,7 @@ import { getLocale } from '@/lib/i18n/server';
 import { text, labels } from '@/lib/i18n';
 import Link from 'next/link';
 import { and, asc, desc, eq, ilike, or, type SQL } from 'drizzle-orm';
+import { z } from 'zod';
 import { db } from '@/server/db';
 import { orders, restaurants } from '@/server/db/schema';
 import { adminPage, platformTimezone } from '@/server/admin-guard';
@@ -21,7 +22,7 @@ export default async function AdminOrders({ searchParams }: { searchParams: Prom
   const page = Math.max(1, Number(sp.page) || 1);
   const tz = await platformTimezone();
   const where: SQL[] = [];
-  if (sp.restaurant) where.push(eq(orders.restaurantId, sp.restaurant));
+  if (sp.restaurant && z.uuid().safeParse(sp.restaurant).success) where.push(eq(orders.restaurantId, sp.restaurant));
   if (sp.status && (ORDER_STATUSES as readonly string[]).includes(sp.status)) where.push(eq(orders.status, sp.status as OrderStatus));
   if (sp.q) {
     const q = sp.q.trim().slice(0, 40);

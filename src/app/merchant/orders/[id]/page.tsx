@@ -16,12 +16,12 @@ export default async function MerchantOrderPage({ params }: { params: Promise<{ 
   if (!z.uuid().safeParse(id).success) notFound();
   const { restaurant, permissions } = await merchantContext(`/merchant/orders/${id}`);
   if (!restaurant || !(permissions.has('orders.view') || permissions.has('reports.view'))) notFound();
-  const [order] = await loadOrderSnapshots(db(), [id], { includePhone: permissions.has('orders.accept') || permissions.has('payments.verify') });
+  const [order] = await loadOrderSnapshots(db(), [id], { includePhone: permissions.has('orders.accept') || permissions.has('payments.verify') || permissions.has('payments.refund') });
   if (!order || order.restaurantId !== restaurant.id) notFound();
   return (
     <main className="mx-auto max-w-6xl space-y-3 p-4">
       <Link href={permissions.has('reports.view') ? '/merchant/dashboard' : '/merchant'} className="text-sm text-blue-700">{text(locale, '← رجوع', '← Back')}</Link>
-      <OrderDetail order={order} restaurantName={localizedName(locale, restaurant.nameAr, restaurant.nameEn)} timezone={restaurant.timezone} canPrint={permissions.has('receipts.print')} />
+      <OrderDetail order={order} restaurantName={localizedName(locale, restaurant.nameAr, restaurant.nameEn)} timezone={restaurant.timezone} canPrint={permissions.has('receipts.print')} canRefund={permissions.has('payments.refund')} />
     </main>
   );
 }

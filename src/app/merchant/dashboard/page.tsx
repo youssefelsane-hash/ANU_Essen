@@ -63,7 +63,7 @@ export default async function MerchantDashboard({ searchParams }: { searchParams
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label={t('طلبات اليوم', 'Today’s orders')} value={stats.orders} />
-        <Stat label={t('المبيعات المسلّمة', 'Delivered sales')} value={formatMoney(stats.sales, locale)} tone="ring-green-200" />
+        <Stat label={t('المبيعات المسلّمة (بعد المرتجعات)', 'Delivered sales (after refunds)')} value={formatMoney(stats.sales, locale)} tone="ring-green-200" />
         <Stat label={t('بانتظار القبول أو الدفع', 'Awaiting acceptance or payment')} value={pending} />
         <Stat label={t('في المطبخ', 'In the kitchen')} value={(active.CONFIRMED ?? 0) + (active.PREPARING ?? 0)} />
       </div>
@@ -75,6 +75,8 @@ export default async function MerchantDashboard({ searchParams }: { searchParams
           <Stat label={t('متوسط الطلب', 'Average order')} value={formatMoney(stats.avgOrder, locale)} />
           <Stat label={t('جاهزة أو في الطريق', 'Ready or on the way')} value={(active.READY ?? 0) + (active.OUT_FOR_DELIVERY ?? 0) + (active.ARRIVED_AT_GATE ?? 0)} />
           <Stat label={t('ملغية', 'Cancelled')} value={stats.cancelled} />
+          <Stat label={t('مبالغ اترجعت للعملاء', 'Refunded to customers')} value={`${formatMoney(stats.refunds, locale)} (${stats.refundCount})`} />
+          <Stat label={t('المبيعات قبل المرتجعات', 'Sales before refunds')} value={formatMoney(stats.grossSales, locale)} />
         </div>
       </details>
 

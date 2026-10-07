@@ -32,8 +32,10 @@ export function receiptText(order: OrderSnapshot, restaurantName: string, timeZo
   out.push(line, row(t('المجموع', 'Subtotal'), formatMoney(order.subtotal, locale)));
   if (order.discountTotal) out.push(row(t('الخصم', 'Discount'), `-${formatMoney(order.discountTotal, locale)}`));
   if (order.deliveryFee) out.push(row(t('التوصيل', 'Delivery'), formatMoney(order.deliveryFee, locale)));
-  out.push(row(t('الإجمالي', 'TOTAL'), formatMoney(order.total, locale)), line);
-  const paid = order.paymentStatus === 'PAYMENT_VERIFIED' ? t('مدفوع', 'PAID') : order.paymentMethod === 'CASH' ? t('تحصيل كاش', 'COLLECT CASH') : copy.paymentStatus[order.paymentStatus];
+  out.push(row(t('الإجمالي', 'TOTAL'), formatMoney(order.total, locale)));
+  if (order.refundedTotal) out.push(row(t('مسترد للعميل', 'Refunded'), `-${formatMoney(order.refundedTotal, locale)}`));
+  out.push(line);
+  const paid = ['PAYMENT_VERIFIED', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(order.paymentStatus) ? t('مدفوع', 'PAID') : order.paymentMethod === 'CASH' ? t('تحصيل كاش', 'COLLECT CASH') : copy.paymentStatus[order.paymentStatus];
   out.push(`${t('الدفع', 'Payment')}: ${copy.paymentMethod[order.paymentMethod]} ${paid}`, `${t('الاستلام', 'Pickup point')}: ${localizedName(locale, order.deliveryPointName, order.deliveryPointNameEn)}`);
   if (order.customerNote) out.push(`${t('ملاحظة', 'Note')}: ${order.customerNote}`);
   return out.join('\n');

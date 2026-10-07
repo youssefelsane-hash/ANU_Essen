@@ -61,6 +61,7 @@ export const PAYMENT_STATUS_AR: Record<PaymentStatus, string> = {
   PAYMENT_REJECTED: 'التحويل مرفوض',
   CASH: 'كاش عند الاستلام',
   REFUNDED: 'مسترد',
+  PARTIALLY_REFUNDED: 'مسترد جزئيًا',
 };
 
 export const PAYMENT_STATUS_TONE: Record<PaymentStatus, string> = {
@@ -70,6 +71,7 @@ export const PAYMENT_STATUS_TONE: Record<PaymentStatus, string> = {
   PAYMENT_REJECTED: 'bg-red-100 text-red-700',
   CASH: 'bg-sky-100 text-sky-800',
   REFUNDED: 'bg-gray-100 text-gray-700',
+  PARTIALLY_REFUNDED: 'bg-amber-100 text-amber-800',
 };
 
 export const STORE_STATUS_AR = { OPEN: 'مفتوح', BUSY: 'زحمة شوية', PAUSED: 'متوقف مؤقتًا', CLOSED: 'مغلق' } as const;
