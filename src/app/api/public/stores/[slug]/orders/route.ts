@@ -4,6 +4,7 @@ import { enforceRateLimit } from '@/server/rate-limit';
 import { createOrder } from '@/server/services/checkout';
 import { normalizeEgyptianPhone } from '@/lib/domain/misc';
 import { createOrderSchema, idempotencyKeySchema } from '@/lib/validation';
+import { env } from '@/server/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,10 +16,10 @@ export const POST = route<{ params: Promise<{ slug: string }> }>(async (req, { p
 
   const input = createOrderSchema.parse(await readJson(req, 50_000));
   // Campus users often share a carrier NAT IP, so the IP limit is generous; the phone limit is tight.
-  await enforceRateLimit(`order:ip:${meta.ip ?? 'unknown'}`, 60, 600);
+  await enforceRateLimit(`order:ip:${meta.ip ?? 'unknown'}`, env().ORDER_IP_RATE_LIMIT, 600);
   const phone = input.customerPhone ? normalizeEgyptianPhone(input.customerPhone) : null;
-  if (phone) await enforceRateLimit(`order:phone:${phone}`, 8, 600);
-
-  const created = await createOrder(slug, input, key.data);
+  const created = await createOrder(slug, input, key.data, new Date(), async (tx) => {
+    if (phone) await enforceRateLimit(`order:phone:${phone}`, env().ORDER_PHONE_RATE_LIMIT, 600, tx);
+  });
   return json(created, { status: created.replayed ? 200 : 201 });
 });

@@ -14,6 +14,7 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL,
+    locale: 'ar-EG',
     channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
     viewport: { width: 1440, height: 1000 },
     screenshot: 'only-on-failure',

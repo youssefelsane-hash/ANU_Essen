@@ -113,7 +113,9 @@ export const restaurants = pgTable('restaurants', {
   logoUrl: text('logo_url'),
   coverImageUrl: text('cover_image_url'),
   badgeText: text('badge_text'),
+  badgeTextEn: text('badge_text_en'),
   taglineAr: text('tagline_ar'),
+  taglineEn: text('tagline_en'),
   brandColor: text('brand_color').notNull().default('#163d35'),
   phone: text('phone'),
   timezone: text('timezone').notNull().default('Africa/Cairo'),
@@ -191,6 +193,7 @@ export interface PaymentMethodConfig {
   /** Optional InstaPay payment link (ipn.eg/…) */
   link?: string;
   instructions?: string;
+  instructionsEn?: string;
 }
 
 export const restaurantPaymentMethods = pgTable(
@@ -370,7 +373,9 @@ export const banners = pgTable(
       .notNull()
       .references(() => restaurants.id, { onDelete: 'cascade' }),
     titleAr: text('title_ar').notNull(),
+    titleEn: text('title_en'),
     subtitleAr: text('subtitle_ar'),
+    subtitleEn: text('subtitle_en'),
     imageUrl: text('image_url'),
     bgColor: text('bg_color').notNull().default('#ea580c'),
     textColor: text('text_color').notNull().default('#ffffff'),
@@ -419,6 +424,7 @@ export const orders = pgTable(
     paymentStatus: paymentStatusEnum('payment_status').notNull(),
     deliveryPointId: uuid('delivery_point_id').references(() => deliveryPoints.id, { onDelete: 'set null' }),
     deliveryPointName: text('delivery_point_name').notNull(),
+    deliveryPointNameEn: text('delivery_point_name_en'),
     subtotal: integer('subtotal').notNull(),
     discountTotal: integer('discount_total').notNull().default(0),
     deliveryFee: integer('delivery_fee').notNull().default(0),

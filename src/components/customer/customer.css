@@ -426,3 +426,14 @@
 .reorder-card p { margin: 4px 0 0; font-size: 12px; color: #4b4f45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reorder-card .customer-primary-button { width: auto; min-width: 150px; }
 @media (max-width: 640px) { .reorder-card { flex-direction: column; align-items: stretch; } .reorder-card .customer-primary-button { width: 100%; } }
+
+.customer-topbar-actions { display: flex; align-items: center; justify-content: end; gap: 12px; }
+.checkout-empty-page { position: relative; }
+.customer-language-row { position: absolute; top: 20px; inset-inline-end: 20px; display: flex; justify-content: end; }
+html[dir="ltr"] .restaurant-hero.has-image::after { background: linear-gradient(90deg, #122016e8 0%, #122016b8 36%, #1220161c 78%); }
+@media (max-width: 640px) {
+  .customer-topbar { height: auto; min-height: 106px; padding-block: 14px; gap: 12px; flex-wrap: wrap; }
+  .customer-topbar-actions { width: 100%; justify-content: space-between; }
+  .checkout-topbar { height: auto; min-height: 80px; padding-block: 12px; flex-wrap: wrap; gap: 8px 12px; }
+  .checkout-topbar .language-switcher { margin-inline-start: auto; }
+}

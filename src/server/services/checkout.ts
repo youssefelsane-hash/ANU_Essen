@@ -58,8 +58,10 @@ function toQuote(priced: PricedCart, etaMinutes: number): QuoteResponse {
       productId: l.productId,
       variantId: l.variantId,
       nameAr: l.nameAr,
+      nameEn: l.nameEn,
       variantNameAr: l.variantNameAr,
-      addons: l.addons.map((a) => ({ nameAr: a.nameAr, price: a.price })),
+      variantNameEn: l.variantNameEn,
+      addons: l.addons.map((a) => ({ nameAr: a.nameAr, nameEn: a.nameEn, price: a.price })),
       unitPrice: l.unitPrice,
       addonsPerUnit: l.addonsPerUnit,
       quantity: l.quantity,
@@ -138,7 +140,7 @@ function replay(o: typeof orders.$inferSelect, requestHash: string): CreatedOrde
  * Creates an order exactly once per Idempotency-Key. Everything (order number, items snapshot,
  * payment, promotion usage, first event) is written in one transaction.
  */
-export async function createOrder(slug: string, input: CreateOrderInput, idempotencyKey: string, now = new Date()): Promise<CreatedOrder> {
+export async function createOrder(slug: string, input: CreateOrderInput, idempotencyKey: string, now = new Date(), admit?: (tx: Db) => Promise<void>): Promise<CreatedOrder> {
   const d = db();
   const r = await getRestaurantBySlug(d, slug);
   if (!r) throw new AppError('NOT_FOUND', 'المحل غير موجود');
@@ -179,6 +181,9 @@ export async function createOrder(slug: string, input: CreateOrderInput, idempot
       const { priced, point } = await priceFor(tx, currentRestaurant, input, now);
       if (input.promoCode && priced.promoError) throw new AppError('PROMO_INVALID', priced.promoError.message);
       if (priced.minOrderShortfall > 0) throw new AppError('MIN_ORDER', `الحد الأدنى للطلب ${egp(priced.minOrderAmount)} ج.م`);
+      // Admission is charged only for a new valid order, under the idempotency lock.
+      // It commits with the order, so retries and rolled-back checkouts don't consume a phone allowance.
+      if (admit) await admit(tx);
       const provisionalEta = computeEta({ confirmedAt: now, activeLoad: currentLive.load, orderLoad: priced.loadUnits, config: currentLive.config, extraDeliveryMinutes: point.extraMinutes });
 
       const [counter] = await tx.update(storeCounters)
@@ -226,6 +231,7 @@ export async function createOrder(slug: string, input: CreateOrderInput, idempot
           paymentStatus,
           deliveryPointId: point.id,
           deliveryPointName: point.nameAr,
+          deliveryPointNameEn: point.nameEn,
           subtotal: priced.subtotal,
           discountTotal: priced.discount,
           deliveryFee: priced.deliveryFee,

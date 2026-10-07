@@ -1,5 +1,7 @@
 'use server';
 
+import { getLocale } from '@/lib/i18n/server';
+import { text } from '@/lib/i18n';
 import { and, eq, inArray, ne } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
@@ -66,7 +68,7 @@ export async function createRestaurantAction(_prev: ActionState, fd: FormData): 
   let id = '';
   const res = await runAction(async () => {
     const auth = await requirePermission('platform.restaurants');
-    const brand = restaurantBrandSchema.parse({ nameAr: str(fd, 'nameAr'), nameEn: str(fd, 'nameEn'), badgeText: optStr(fd, 'badgeText'), taglineAr: optStr(fd, 'taglineAr'), brandColor: optStr(fd, 'brandColor') ?? undefined, logoUrl: optStr(fd, 'logoUrl'), coverImageUrl: optStr(fd, 'coverImageUrl') });
+    const brand = restaurantBrandSchema.parse({ nameAr: str(fd, 'nameAr'), nameEn: str(fd, 'nameEn'), badgeText: optStr(fd, 'badgeText'), badgeTextEn: optStr(fd, 'badgeTextEn'), taglineAr: optStr(fd, 'taglineAr'), taglineEn: optStr(fd, 'taglineEn'), brandColor: optStr(fd, 'brandColor') ?? undefined, logoUrl: optStr(fd, 'logoUrl'), coverImageUrl: optStr(fd, 'coverImageUrl') });
     const slug = slugify(str(fd, 'slug') || brand.nameEn);
     if (!slug) throw new AppError('VALIDATION', 'Slug is required (latin letters/numbers)');
     const [taken] = await db().select({ id: restaurants.id }).from(restaurants).where(eq(restaurants.slug, slug));
@@ -111,7 +113,7 @@ export async function updateRestaurantAction(_prev: ActionState, fd: FormData): 
     }
     const patch = {
       slug,
-      ...restaurantBrandSchema.parse({ nameAr: str(fd, 'nameAr'), nameEn: str(fd, 'nameEn'), badgeText: optStr(fd, 'badgeText'), taglineAr: optStr(fd, 'taglineAr'), brandColor: str(fd, 'brandColor'), logoUrl: optStr(fd, 'logoUrl'), coverImageUrl: optStr(fd, 'coverImageUrl') }),
+      ...restaurantBrandSchema.parse({ nameAr: str(fd, 'nameAr'), nameEn: str(fd, 'nameEn'), badgeText: optStr(fd, 'badgeText'), badgeTextEn: optStr(fd, 'badgeTextEn'), taglineAr: optStr(fd, 'taglineAr'), taglineEn: optStr(fd, 'taglineEn'), brandColor: str(fd, 'brandColor'), logoUrl: optStr(fd, 'logoUrl'), coverImageUrl: optStr(fd, 'coverImageUrl') }),
       phone: optStr(fd, 'phone'),
       timezone,
       orderingStatus: z.enum(['OPEN', 'PAUSED', 'CLOSED']).parse(str(fd, 'orderingStatus')),
@@ -183,6 +185,7 @@ export async function updatePaymentMethodAction(_prev: ActionState, fd: FormData
       phone: optStr(fd, 'phone') ?? undefined,
       link: optStr(fd, 'link') ? webUrl.parse(str(fd, 'link')) : undefined,
       instructions: optStr(fd, 'instructions') ?? undefined,
+      instructionsEn: optStr(fd, 'instructionsEn') ?? undefined,
     };
     const isEnabled = bool(fd, 'isEnabled');
     if (method === 'INSTAPAY' && isEnabled && !config.address && !config.phone) {
@@ -195,7 +198,7 @@ export async function updatePaymentMethodAction(_prev: ActionState, fd: FormData
       .onConflictDoUpdate({ target: [restaurantPaymentMethods.restaurantId, restaurantPaymentMethods.method], set: { isEnabled, config, updatedAt: new Date() } });
     await audit({ actor: actor(auth), action: 'payment_method.updated', entity: 'payment_method', entityId: method, restaurantId, before: before ? { isEnabled: before.isEnabled, config: before.config } : null, after: { isEnabled, config }, ...(await requestMeta()) });
     revalidatePath(`/admin/restaurants/${restaurantId}`);
-    return `${method} saved`;
+    return text(await getLocale('staff'), 'تم حفظ طريقة الدفع', 'Payment method saved');
   });
 }
 
@@ -432,7 +435,9 @@ export async function saveBannerAction(_prev: ActionState, fd: FormData): Promis
     const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
     const values = {
       titleAr: z.string().min(2).max(120).parse(str(fd, 'titleAr')),
+      titleEn: optStr(fd, 'titleEn'),
       subtitleAr: optStr(fd, 'subtitleAr'),
+      subtitleEn: optStr(fd, 'subtitleEn'),
       imageUrl: restaurantImageUrlSchema.parse(optStr(fd, 'imageUrl')),
       bgColor: color.parse(str(fd, 'bgColor') || '#c2410c'),
       textColor: color.parse(str(fd, 'textColor') || '#ffffff'),

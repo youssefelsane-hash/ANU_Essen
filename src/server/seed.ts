@@ -86,7 +86,7 @@ export async function assignRole(d: Db, userId: string, roleKey: string, restaur
 /** Creates everything a new restaurant needs to take orders (counters, queue config, payment methods). */
 export async function bootstrapRestaurant(
   d: Db,
-  data: { slug: string; nameAr: string; nameEn: string; commissionBps?: number; phone?: string | null; badgeText?: string | null; taglineAr?: string | null; brandColor?: string; logoUrl?: string | null; coverImageUrl?: string | null },
+  data: { slug: string; nameAr: string; nameEn: string; commissionBps?: number; phone?: string | null; badgeText?: string | null; badgeTextEn?: string | null; taglineAr?: string | null; taglineEn?: string | null; brandColor?: string; logoUrl?: string | null; coverImageUrl?: string | null },
   queue: QueueConfig = DEFAULT_QUEUE_CONFIG,
 ) {
   const brand = restaurantBrandSchema.parse(data);
@@ -134,7 +134,7 @@ export async function seedDemoRestaurant(d: Db, opts: { demoPassword?: string | 
     };
   }
 
-  const r = await bootstrapRestaurant(d, { slug, nameAr: 'الراية الدمشقية', nameEn: 'Al Raya Al Dimashqia', badgeText: 'الراية', taglineAr: 'من قلب الشام، لحد عندك', brandColor: '#163d35', coverImageUrl: '/images/restaurant-hero.webp', commissionBps: 500 });
+  const r = await bootstrapRestaurant(d, { slug, nameAr: 'الراية الدمشقية', nameEn: 'Al Raya Al Dimashqia', badgeText: 'الراية', badgeTextEn: 'Al Raya', taglineAr: 'من قلب الشام، لحد عندك', taglineEn: 'From the heart of Damascus, to you', brandColor: '#163d35', coverImageUrl: '/images/restaurant-hero.webp', commissionBps: 500 });
   await d
     .update(restaurantPaymentMethods)
     .set({
@@ -144,6 +144,7 @@ export async function seedDemoRestaurant(d: Db, opts: { demoPassword?: string | 
         address: 'alrayez@instapay',
         phone: '01000000000',
         instructions: 'اكتب رقم الطلب في ملاحظة التحويل لو تقدر',
+        instructionsEn: 'Add your order number to the transfer note if you can',
       },
     })
     .where(and(eq(restaurantPaymentMethods.restaurantId, r.id), eq(restaurantPaymentMethods.method, 'INSTAPAY')));
@@ -169,9 +170,9 @@ export async function seedDemoRestaurant(d: Db, opts: { demoPassword?: string | 
   const productRows = await d
     .insert(products)
     .values([
-      { restaurantId: r.id, categoryId: sandwiches.id, nameAr: 'ساندوتش شاورما فراخ', nameEn: 'Chicken Shawarma Sandwich', descriptionAr: 'شاورما فراخ بالثومية والمخلل', imageUrl: '/images/chicken-shawarma.webp', basePrice: p(60), prepLoadUnits: 1, sortOrder: 1 },
-      { restaurantId: r.id, categoryId: sandwiches.id, nameAr: 'ساندوتش شاورما لحمة', nameEn: 'Meat Shawarma Sandwich', descriptionAr: 'شاورما لحمة بالطحينة', imageUrl: '/images/beef-shawarma.webp', basePrice: p(75), prepLoadUnits: 1, sortOrder: 2 },
-      { restaurantId: r.id, categoryId: meals.id, nameAr: 'وجبة شاورما', nameEn: 'Shawarma Meal', descriptionAr: 'شاورما عربي + بطاطس + ثومية + مخلل', imageUrl: '/images/chicken-shawarma.webp', basePrice: p(140), prepLoadUnits: 2, sortOrder: 1 },
+      { restaurantId: r.id, categoryId: sandwiches.id, nameAr: 'ساندوتش شاورما فراخ', nameEn: 'Chicken Shawarma Sandwich', descriptionAr: 'شاورما فراخ بالثومية والمخلل', descriptionEn: 'Chicken shawarma with garlic sauce and pickles', imageUrl: '/images/chicken-shawarma.webp', basePrice: p(60), prepLoadUnits: 1, sortOrder: 1 },
+      { restaurantId: r.id, categoryId: sandwiches.id, nameAr: 'ساندوتش شاورما لحمة', nameEn: 'Meat Shawarma Sandwich', descriptionAr: 'شاورما لحمة بالطحينة', descriptionEn: 'Beef shawarma with tahini sauce', imageUrl: '/images/beef-shawarma.webp', basePrice: p(75), prepLoadUnits: 1, sortOrder: 2 },
+      { restaurantId: r.id, categoryId: meals.id, nameAr: 'وجبة شاورما', nameEn: 'Shawarma Meal', descriptionAr: 'شاورما عربي + بطاطس + ثومية + مخلل', descriptionEn: 'Arabic shawarma, fries, garlic sauce and pickles', imageUrl: '/images/chicken-shawarma.webp', basePrice: p(140), prepLoadUnits: 2, sortOrder: 1 },
       { restaurantId: r.id, categoryId: sides.id, nameAr: 'بطاطس', nameEn: 'Fries', basePrice: p(35), prepLoadUnits: 1, sortOrder: 1 },
       { restaurantId: r.id, categoryId: drinks.id, nameAr: 'مشروب غازي', nameEn: 'Soft Drink', basePrice: p(20), prepLoadUnits: 0, sortOrder: 1 },
     ])
@@ -214,8 +215,8 @@ export async function seedDemoRestaurant(d: Db, opts: { demoPassword?: string | 
     ])
     .returning();
   await d.insert(banners).values([
-    { restaurantId: r.id, titleAr: 'طعم شامي، على أصوله', subtitleAr: 'شاورما معمولة بحب. اطلب دلوقتي واستلم عند بوابة الجامعة.', imageUrl: '/images/restaurant-hero.webp', bgColor: '#163d35', sortOrder: 1 },
-    { restaurantId: r.id, titleAr: 'خصم 10% على طلبك', subtitleAr: 'استخدم كود WELCOME10 (من 100 ج.م)', bgColor: '#166534', promotionId: welcome.id, sortOrder: 2 },
+    { restaurantId: r.id, titleAr: 'طعم شامي، على أصوله', titleEn: 'Authentic Syrian flavour', subtitleAr: 'شاورما معمولة بحب. اطلب دلوقتي واستلم عند بوابة الجامعة.', subtitleEn: 'Shawarma made with care. Order now and collect at the university gate.', imageUrl: '/images/restaurant-hero.webp', bgColor: '#163d35', sortOrder: 1 },
+    { restaurantId: r.id, titleAr: 'خصم 10% على طلبك', titleEn: '10% off your order', subtitleAr: 'استخدم كود WELCOME10 (من 100 ج.م)', subtitleEn: 'Use WELCOME10 on orders of EGP 100 or more', bgColor: '#166534', promotionId: welcome.id, sortOrder: 2 },
   ]);
 
   if (opts.demoPassword) {

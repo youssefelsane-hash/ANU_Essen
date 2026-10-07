@@ -6,6 +6,9 @@ const schema = z.object({
   APP_URL: z.string().url().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  ORDER_IP_RATE_LIMIT: z.coerce.number().int().min(100).max(10000).default(600),
+  ORDER_PHONE_RATE_LIMIT: z.coerce.number().int().min(1).max(100).default(8),
+  QUOTE_IP_RATE_LIMIT: z.coerce.number().int().min(100).max(10000).default(1200),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 });
 

@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+import { localizedName, text } from '@/lib/i18n';
+import { getLocale } from '@/lib/i18n/server';
 import { notFound } from 'next/navigation';
 import { db } from '@/server/db';
 import { loadPublicMenu } from '@/server/services/menu';
@@ -7,16 +9,20 @@ import { StoreMenu } from '@/components/customer/store-menu';
 export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const locale = await getLocale('customer');
+  const t = (ar: string, en: string) => text(locale, ar, en);
   const menu = await loadPublicMenu(db(), (await params).slug);
-  if (!menu) return { title: 'المطعم غير موجود' };
-  const description = menu.restaurant.taglineAr || 'اختار وجبتك من ' + menu.restaurant.nameAr + '، حدّد الاستلام والدفع وتابع تجهيز طلبك.';
+  if (!menu) return { title: t('المطعم غير موجود', 'Restaurant not found') };
+  const name = localizedName(locale, menu.restaurant.nameAr, menu.restaurant.nameEn);
+  const description = localizedName(locale, menu.restaurant.taglineAr, menu.restaurant.taglineEn) || t('اختار وجبتك من ' + name + '، حدّد الاستلام والدفع وتابع تجهيز طلبك.', 'Choose your meal from ' + name + ', arrange pickup and payment, and track your order.');
   return {
-    title: menu.restaurant.nameAr + ' — المنيو والطلب المباشر',
+    title: name + t(' — المنيو والطلب المباشر', ' — Menu and direct ordering'),
     description,
     openGraph: {
-      title: menu.restaurant.nameAr,
+      title: name,
       description,
-      locale: 'ar_EG',
+      locale: locale === 'ar' ? 'ar_EG' : 'en_US',
+      alternateLocale: locale === 'ar' ? ['en_US'] : ['ar_EG'],
       type: 'website',
       ...(menu.restaurant.coverImageUrl ? { images: [menu.restaurant.coverImageUrl] } : {}),
     },

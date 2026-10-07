@@ -1,3 +1,5 @@
+import { getLocale } from '@/lib/i18n/server';
+import { text, localizedName } from '@/lib/i18n';
 import Link from 'next/link';
 import { eq } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
@@ -13,6 +15,8 @@ import { Forbidden } from '@/components/admin/ui';
 export const dynamic = 'force-dynamic';
 
 export default async function AdminOrderPage({ params }: { params: Promise<{ id: string }> }) {
+  const locale = await getLocale();
+  const t = (ar: string, en: string) => text(locale, ar, en);
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
   const auth = await adminPage(`/admin/orders/${id}`, 'platform.restaurants');
@@ -22,11 +26,11 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
   const [row] = await db().select().from(orders).where(eq(orders.id, id));
   const r = await getRestaurant(db(), snapshot.restaurantId);
   return (
-    <div className="space-y-3" dir="rtl">
-      <Link href="/admin/orders" className="text-sm text-blue-700" dir="ltr">← Orders</Link>
+    <div className="space-y-3">
+      <Link href="/admin/orders" className="text-sm text-blue-700">{t("العودة للطلبات", "← Orders")}</Link>
       <OrderDetail
         order={snapshot}
-        restaurantName={r?.nameAr ?? ''}
+        restaurantName={localizedName(locale, r?.nameAr, r?.nameEn)}
         timezone={r?.timezone ?? 'Africa/Cairo'}
         canPrint
         commission={auth.platformPermissions.has('platform.finance') ? { bps: row.commissionBps, amount: row.commissionAmount, merchantNet: row.merchantNet, source: row.source } : null}

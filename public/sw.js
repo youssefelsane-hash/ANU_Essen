@@ -3,7 +3,7 @@
  * - App shell: pages network-first with cached fallback, hashed static assets cache-first.
  * - API calls are never cached here: order data lives in IndexedDB and syncs via the outbox/cursor.
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const STATIC_CACHE = `merchant-static-${VERSION}`;
 const PAGE_CACHE = `merchant-pages-${VERSION}`;
 
@@ -27,7 +27,7 @@ self.addEventListener('fetch', (event) => {
 
   if (url.pathname.startsWith('/_next/static/') || /\.(?:png|svg|ico|webmanifest|woff2?)$/.test(url.pathname)) {
     event.respondWith(cacheFirst(req));
-  } else if (req.mode === 'navigate' && url.pathname.startsWith('/merchant')) {
+  } else if (req.mode === 'navigate' && /^\/merchant\/?$/.test(url.pathname)) {
     event.respondWith(networkFirst(req));
   }
 });
@@ -68,7 +68,7 @@ async function networkFirst(req) {
     const hit = (await cache.match(req, { ignoreSearch: true })) || (await cache.match('/merchant'));
     if (hit) return hit;
     return new Response(
-      '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><body dir="rtl" style="font-family:system-ui;padding:24px"><h2>مفيش نت</h2><p>افتح صفحة الطلبات مرة واحدة وانت متصل، وبعدها هتشتغل حتى لو النت قطع.</p></body>',
+      '<!doctype html><html lang="ar"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui;padding:24px"><section dir="rtl"><h2>مفيش نت</h2><p>افتح صفحة الطلبات مرة واحدة وانت متصل، وبعدها هتشتغل حتى لو النت قطع.</p></section><hr><section lang="en" dir="ltr"><h2>You are offline</h2><p>Open the orders screen once while connected. It will then reopen even without internet.</p></section></body></html>',
       { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } },
     );
   }

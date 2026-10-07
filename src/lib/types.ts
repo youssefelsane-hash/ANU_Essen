@@ -8,11 +8,12 @@ export interface SnapshotItem {
   nameAr: string;
   nameEn: string;
   variantNameAr: string | null;
+  variantNameEn?: string | null;
   quantity: number;
   unitPrice: number;
   addonsPerUnit: number;
   lineTotal: number;
-  addons: { nameAr: string; price: number }[];
+  addons: { nameAr: string; nameEn?: string; price: number }[];
   note: string | null;
 }
 
@@ -40,6 +41,7 @@ export interface OrderSnapshot {
   customerPhone: string | null;
   customerNote: string | null;
   deliveryPointName: string;
+  deliveryPointNameEn?: string | null;
   items: SnapshotItem[];
   subtotal: number;
   discountTotal: number;
@@ -116,6 +118,7 @@ export interface TrackingView {
     paymentRejectedReason: string | null;
     customerName: string;
     deliveryPointName: string;
+    deliveryPointNameEn?: string | null;
     items: SnapshotItem[];
     subtotal: number;
     discountTotal: number;
@@ -135,7 +138,7 @@ export interface TrackingView {
     paymentDeadlineAt: number | null;
   };
   restaurant: { nameAr: string; nameEn: string; phone: string | null; slug: string; timezone: string };
-  instapay: { accountName: string | null; address: string | null; phone: string | null; link: string | null; instructions: string | null } | null;
+  instapay: { accountName: string | null; address: string | null; phone: string | null; link: string | null; instructions: string | null; instructionsEn?: string | null } | null;
 }
 
 export interface PublicMenuProduct {
@@ -144,6 +147,7 @@ export interface PublicMenuProduct {
   nameAr: string;
   nameEn: string;
   descriptionAr: string | null;
+  descriptionEn?: string | null;
   imageUrl: string | null;
   basePrice: number;
   isAvailable: boolean;
@@ -160,7 +164,9 @@ export interface PublicMenu {
     logoUrl: string | null;
     coverImageUrl: string | null;
     badgeText: string | null;
+    badgeTextEn?: string | null;
     taglineAr: string | null;
+    taglineEn?: string | null;
     brandColor: string;
     phone: string | null;
     minOrderAmount: number;
@@ -169,8 +175,8 @@ export interface PublicMenu {
   store: { status: EffectiveStatus; reason: StatusReason; etaMinutes: number };
   categories: { id: string; nameAr: string; nameEn: string }[];
   products: PublicMenuProduct[];
-  addonGroups: { id: string; nameAr: string; minSelect: number; maxSelect: number; addons: { id: string; nameAr: string; price: number; isAvailable: boolean }[] }[];
-  banners: { id: string; titleAr: string; subtitleAr: string | null; imageUrl: string | null; bgColor: string; textColor: string }[];
+  addonGroups: { id: string; nameAr: string; nameEn?: string; minSelect: number; maxSelect: number; addons: { id: string; nameAr: string; nameEn?: string; price: number; isAvailable: boolean }[] }[];
+  banners: { id: string; titleAr: string; titleEn?: string | null; subtitleAr: string | null; subtitleEn?: string | null; imageUrl: string | null; bgColor: string; textColor: string }[];
   paymentMethods: { method: PaymentMethod }[];
   deliveryPoints: { id: string; nameAr: string; nameEn: string; isDefault: boolean; deliveryFee: number }[];
 }
@@ -180,8 +186,10 @@ export interface QuoteResponse {
     productId: string;
     variantId: string | null;
     nameAr: string;
+    nameEn?: string;
     variantNameAr: string | null;
-    addons: { nameAr: string; price: number }[];
+    variantNameEn?: string | null;
+    addons: { nameAr: string; nameEn?: string; price: number }[];
     unitPrice: number;
     addonsPerUnit: number;
     quantity: number;
