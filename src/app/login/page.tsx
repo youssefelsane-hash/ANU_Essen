@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { safeInternalPath } from '@/lib/domain/misc';
 import { redirect } from 'next/navigation';
 import { getAuth } from '@/server/auth/session';
 import { loginAction } from '@/server/actions/auth';
@@ -17,7 +18,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const locale = await getLocale('staff');
   const t = (ar: string, en: string) => text(locale, ar, en);
   const auth = await getAuth();
-  if (auth) redirect(next?.startsWith('/') && !next.startsWith('//') ? next : auth.isPlatform ? '/admin' : '/merchant');
+  if (auth) redirect(safeInternalPath(next) ?? (auth.isPlatform ? '/admin' : '/merchant'));
   return (
     <main className="login-shell">
       <section className="login-intro">

@@ -71,6 +71,7 @@ export default async function RestaurantSettingsPage({ params }: { params: Promi
             <Field label={t("عمولة المنصة (%)", "Platform commission (%)")}><input name="commissionPercent" defaultValue={r.commissionBps / 100} className="input" inputMode="decimal" /></Field>
             <Field label={t("إلغاء الطلب غير المدفوع بعد — بالدقائق، صفر للإيقاف", "Cancel unpaid InstaPay orders after (min, 0 = never)")}><input name="unpaidTimeoutMinutes" defaultValue={r.unpaidTimeoutMinutes} className="input" inputMode="numeric" /></Field>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="requirePhone" defaultChecked={r.requirePhone} /> {t("رقم الهاتف مطلوب للطلب", "Phone number required at checkout")}</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="counterCommissionEnabled" defaultChecked={r.counterCommissionEnabled} /> {t("احسب عمولة المنصة على طلبات الكاشير كمان", "Charge platform commission on counter orders too")}</label>
 </div></details>
             <div className="sm:col-span-2"><SubmitButton>{t("حفظ بيانات المطعم", "Save settings")}</SubmitButton></div>
           </ActionForm>
@@ -114,6 +115,13 @@ export default async function RestaurantSettingsPage({ params }: { params: Promi
                   <div className="text-xs font-semibold text-gray-500 sm:col-span-2">{p ? t("مكان الاستلام", "Delivery point") : t("إضافة مكان استلام", "Add delivery point")}</div>
                   <input aria-label={t("اسم مكان الاستلام بالعربي", "Pickup name in Arabic")} name="nameAr" defaultValue={p?.nameAr ?? ''} placeholder={t("الاسم بالعربي", "Name (Arabic)")} className="input" dir="rtl" required />
                   <input aria-label={t("اسم مكان الاستلام بالإنجليزي", "Pickup name in English")} name="nameEn" defaultValue={p?.nameEn ?? ''} placeholder={t("الاسم بالإنجليزي", "Name (English)")} className="input" required />
+                  <Field label={t("النوع", "Type")}>
+                    <select name="kind" defaultValue={p?.kind ?? 'DELIVERY'} className="input">
+                      <option value="DELIVERY">{t("🛵 توصيل لنقطة استلام (مثلاً بوابة الجامعة)", "🛵 Delivery to a pickup point (e.g. university gate)")}</option>
+                      <option value="PICKUP">{t("🏪 استلام من المطعم (من غير توصيل)", "🏪 Pickup at the restaurant (no delivery)")}</option>
+                    </select>
+                  </Field>
+                  <div className="hidden sm:block" />
                   <Field label={t("رسوم التوصيل بالجنيه", "Delivery fee (EGP)")}><input name="deliveryFee" defaultValue={(p?.deliveryFee ?? 0) / 100} className="input" /></Field>
                   <Field label={t("وقت توصيل إضافي بالدقائق", "Extra delivery minutes")}><input name="extraMinutes" defaultValue={p?.extraMinutes ?? 0} className="input" /></Field>
                   <input type="hidden" name="sortOrder" value={p?.sortOrder ?? points.length} />

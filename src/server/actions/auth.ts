@@ -11,6 +11,7 @@ import { hitRateLimit } from '../rate-limit';
 import { audit } from '../services/audit';
 import { requestMeta } from './util';
 import type { ActionState } from '../../lib/action-state';
+import { safeInternalPath } from '../../lib/domain/misc';
 
 let dummyHash: Promise<string> | null = null;
 
@@ -22,7 +23,9 @@ export async function loginAction(_prev: ActionState, fd: FormData): Promise<Act
   if (!email || !password) return { ok: false, error: 'اكتب البريد الإلكتروني وكلمة المرور', at: Date.now() };
 
   const { allowed } = await hitRateLimit(`login:${meta.ip ?? 'unknown'}:${email}`, 10, 900);
-  if (!allowed) return { ok: false, error: 'محاولات كتير. جرّب تاني بعد 15 دقيقة', at: Date.now() };
+  // Also cap attempts per network across all accounts (password spraying).
+  const { allowed: networkAllowed } = await hitRateLimit(`login:ip:${meta.ip ?? 'unknown'}`, 60, 900);
+  if (!allowed || !networkAllowed) return { ok: false, error: 'محاولات كتير. جرّب تاني بعد 15 دقيقة', at: Date.now() };
 
   const [user] = await db().select().from(users).where(eq(users.email, email));
   // Always run a hash comparison so response time doesn't reveal whether the email exists.
@@ -43,7 +46,7 @@ export async function loginAction(_prev: ActionState, fd: FormData): Promise<Act
   await audit({ actor: { type: 'USER', userId: user.id, label: user.name }, action: 'auth.login', entity: 'user', entityId: user.id, ip: meta.ip, userAgent: meta.userAgent });
 
   const auth = await loadAuthz(db(), { id: user.id, name: user.name, email: user.email });
-  const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : null;
+  const safeNext = safeInternalPath(next);
   redirect(safeNext ?? (auth.isPlatform ? '/admin' : '/merchant'));
 }
 

@@ -34,6 +34,7 @@ export default async function MerchantLayout({ children }: { children: React.Rea
   }
   const links = [
     { href: '/merchant', ar: 'الطلبات', en: 'Orders', show: permissions.has('orders.view') || permissions.has('orders.delivery') },
+    { href: '/merchant/new-order', ar: 'طلب من الكاشير', en: 'Counter order', show: permissions.has('orders.create') },
     { href: '/merchant/dashboard', ar: 'ملخص اليوم', en: 'Today', show: permissions.has('reports.view') },
     { href: '/merchant/menu', ar: 'الأصناف والأسعار', en: 'Menu & prices', show: permissions.has('menu.availability') || permissions.has('menu.manage') },
     { href: '/merchant/staff', ar: 'الفريق', en: 'Team', show: permissions.has('staff.manage') },

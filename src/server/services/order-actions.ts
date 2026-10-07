@@ -63,7 +63,7 @@ function duplicateResult(order: typeof orders.$inferSelect, event: typeof orderE
   }
   if (event.actorType !== input.actor.type || event.actorUserId !== (input.actor.userId ?? null) ||
       !actorMayPerform(input.actor.type, input.action, event.fromStatus ?? order.status, (p) =>
-        input.actor.auth ? hasPermission(input.actor.auth, p, order.restaurantId) : false)) {
+        input.actor.auth ? hasPermission(input.actor.auth, p, order.restaurantId) : false, order.fulfillment)) {
     throw new AppError('FORBIDDEN', 'Not allowed to replay this action');
   }
   return { result: 'duplicate', orderId: order.id, restaurantId: order.restaurantId, status: order.status };
@@ -93,13 +93,13 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
         throw new AppError('INVALID_TRANSITION', 'Order changed since the background job inspected it');
       }
 
-      const next = nextStatus(order.status, input.action);
+      const next = nextStatus(order.status, input.action, order.fulfillment);
       if (!next) {
         throw new AppError('INVALID_TRANSITION', `Cannot ${input.action} an order that is ${order.status}`, { current: order.status, action: input.action });
       }
       const permitted = actorMayPerform(input.actor.type, input.action, order.status, (p) =>
         input.actor.auth ? hasPermission(input.actor.auth, p, order.restaurantId) : false,
-      );
+      order.fulfillment);
       if (!permitted) throw new AppError('FORBIDDEN', 'Not allowed to perform this action');
 
       if (input.action === 'SUBMIT_PAYMENT') {
@@ -151,13 +151,15 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
           const [dp] = await tx.select({ extra: deliveryPoints.extraMinutes }).from(deliveryPoints).where(eq(deliveryPoints.id, order.deliveryPointId));
           extra = dp?.extra ?? 0;
         }
+        // Pickup at the restaurant: no delivery leg, the order is "there" once it is ready.
+        if (order.fulfillment === 'PICKUP') return { cfg, extra: 0, minutes: 0 };
         return { cfg, extra, minutes: cfg.deliveryMinutes + extra };
       };
 
       if (next === 'CONFIRMED') {
         const { cfg, extra } = await deliveryMinutes();
         const { load } = await getActiveLoad(tx, order.restaurantId, order.id);
-        const eta = computeEta({ confirmedAt: at, activeLoad: load, orderLoad: order.loadUnits, config: cfg, extraDeliveryMinutes: extra });
+        const eta = computeEta({ confirmedAt: at, activeLoad: load, orderLoad: order.loadUnits, config: cfg, extraDeliveryMinutes: extra, pickup: order.fulfillment === 'PICKUP' });
         patch.estimatedPrepStartAt = eta.prepStartAt;
         patch.estimatedReadyAt = eta.readyAt;
         patch.estimatedArrivalAt = eta.arrivalAt;

@@ -15,7 +15,7 @@ import {
   storeCounters,
 } from '../db/schema';
 import { AppError } from '../errors';
-import { initialStatusFor, type OrderStatus, type PaymentMethod } from '../../lib/domain/order-machine';
+import { initialStatusFor, type OrderChannel, type OrderStatus, type PaymentMethod } from '../../lib/domain/order-machine';
 import { egp, priceCart, type PricedCart } from '../../lib/domain/pricing';
 import { formatOrderNumber, normalizeEgyptianPhone } from '../../lib/domain/misc';
 import { acceptsOrders } from '../../lib/domain/store-status';
@@ -23,6 +23,8 @@ import { computeEta } from '../../lib/domain/queue';
 import type { CreateOrderInput } from '../../lib/validation';
 import type { QuoteResponse } from '../../lib/types';
 import { loadMenuCatalog, loadPromotionRules } from './menu';
+import { applyOrderAction } from './order-actions';
+import { hasPermission, type AuthzSnapshot } from '../../lib/domain/permissions';
 import { closedMessage, getRestaurant, getRestaurantBySlug, getStoreLive, type RestaurantRow } from './store';
 
 async function resolveDeliveryPoint(d: Db, restaurantId: string, id?: string | null) {
@@ -36,7 +38,7 @@ async function resolveDeliveryPoint(d: Db, restaurantId: string, id?: string | n
   return point;
 }
 
-async function priceFor(d: Db, r: RestaurantRow, input: { items: CreateOrderInput['items']; promoCode?: string | null; deliveryPointId?: string | null }, now: Date) {
+async function priceFor(d: Db, r: RestaurantRow, input: { items: CreateOrderInput['items']; promoCode?: string | null; deliveryPointId?: string | null }, now: Date, commissionBps = r.commissionBps) {
   const point = await resolveDeliveryPoint(d, r.id, input.deliveryPointId);
   const [catalog, promos] = await Promise.all([loadMenuCatalog(d, r.id), loadPromotionRules(d, r.id)]);
   const priced = priceCart(input.items, {
@@ -45,9 +47,10 @@ async function priceFor(d: Db, r: RestaurantRow, input: { items: CreateOrderInpu
     promotions: promos,
     promoCode: input.promoCode,
     now,
-    deliveryFee: point.deliveryFee,
+    // Collecting at the restaurant never carries a delivery fee.
+    deliveryFee: point.kind === 'PICKUP' ? 0 : point.deliveryFee,
     minOrderAmount: r.minOrderAmount,
-    commissionBps: r.commissionBps,
+    commissionBps,
   });
   return { priced, point };
 }
@@ -86,7 +89,7 @@ export async function quote(slug: string, input: { items: CreateOrderInput['item
   if (!r.isActive) throw new AppError('STORE_CLOSED', closedMessage('CLOSED', 'INACTIVE'));
   const now = new Date();
   const [{ priced, point }, live] = await Promise.all([priceFor(d, r, input, now), getStoreLive(d, r, now)]);
-  const eta = computeEta({ confirmedAt: now, activeLoad: live.load, orderLoad: priced.loadUnits, config: live.config, extraDeliveryMinutes: point.extraMinutes });
+  const eta = computeEta({ confirmedAt: now, activeLoad: live.load, orderLoad: priced.loadUnits, config: live.config, extraDeliveryMinutes: point.extraMinutes, pickup: point.kind === 'PICKUP' });
   return toQuote(priced, eta.prepMinutes + eta.deliveryMinutes);
 }
 
@@ -141,9 +144,26 @@ function replay(o: typeof orders.$inferSelect, requestHash: string): CreatedOrde
  * payment, promotion usage, first event) is written in one transaction.
  */
 export async function createOrder(slug: string, input: CreateOrderInput, idempotencyKey: string, now = new Date(), admit?: (tx: Db) => Promise<void>): Promise<CreatedOrder> {
-  const d = db();
-  const r = await getRestaurantBySlug(d, slug);
+  const r = await getRestaurantBySlug(db(), slug);
   if (!r) throw new AppError('NOT_FOUND', 'المحل غير موجود');
+  return createOrderFor(r, input, idempotencyKey, now, { channel: 'ONLINE', admit });
+}
+
+interface CreateOptions {
+  channel: OrderChannel;
+  /** Staff member entering a counter order. */
+  createdByUserId?: string | null;
+  admit?: (tx: Db) => Promise<void>;
+}
+
+/**
+ * Online orders follow every customer-facing rule (opening hours, pause, enabled payment methods,
+ * minimum order, required phone). Counter orders are entered by staff for someone standing at the
+ * register, so those online-only rules don't apply — but a platform suspension still does.
+ */
+async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempotencyKey: string, now: Date, opts: CreateOptions): Promise<CreatedOrder> {
+  const d = db();
+  const isCounter = opts.channel === 'COUNTER';
   const requestHash = hashRequest(input);
 
   const existing = await findByIdempotencyKey(d, r.id, idempotencyKey);
@@ -170,21 +190,25 @@ export async function createOrder(slug: string, input: CreateOrderInput, idempot
       // filled after the checkout screen opened must not silently accept another order.
       const currentRestaurant = await getRestaurant(tx, r.id);
       if (!currentRestaurant) throw new AppError('NOT_FOUND', 'المحل غير موجود');
-      if (currentRestaurant.requirePhone && !phone) throw new AppError('VALIDATION', 'رقم الموبايل مطلوب', { field: 'customerPhone' });
+      if (!isCounter && currentRestaurant.requirePhone && !phone) throw new AppError('VALIDATION', 'رقم الموبايل مطلوب', { field: 'customerPhone' });
       const currentLive = await getStoreLive(tx, currentRestaurant, now);
-      if (!acceptsOrders(currentLive.status)) {
+      if (!currentRestaurant.isActive) throw new AppError('STORE_CLOSED', closedMessage('CLOSED', 'INACTIVE'));
+      if (!isCounter && !acceptsOrders(currentLive.status)) {
         throw new AppError(currentLive.status === 'PAUSED' ? 'STORE_PAUSED' : 'STORE_CLOSED', closedMessage(currentLive.status, currentLive.reason));
       }
-      const [method] = await tx.select().from(restaurantPaymentMethods)
-        .where(and(eq(restaurantPaymentMethods.restaurantId, r.id), eq(restaurantPaymentMethods.method, input.paymentMethod)));
-      if (!method?.isEnabled) throw new AppError('PAYMENT_METHOD_DISABLED', 'طريقة الدفع دي مش متاحة حاليًا');
-      const { priced, point } = await priceFor(tx, currentRestaurant, input, now);
+      if (!isCounter) {
+        const [method] = await tx.select().from(restaurantPaymentMethods)
+          .where(and(eq(restaurantPaymentMethods.restaurantId, r.id), eq(restaurantPaymentMethods.method, input.paymentMethod)));
+        if (!method?.isEnabled) throw new AppError('PAYMENT_METHOD_DISABLED', 'طريقة الدفع دي مش متاحة حاليًا');
+      }
+      const commissionBps = isCounter && !currentRestaurant.counterCommissionEnabled ? 0 : currentRestaurant.commissionBps;
+      const { priced, point } = await priceFor(tx, currentRestaurant, input, now, commissionBps);
       if (input.promoCode && priced.promoError) throw new AppError('PROMO_INVALID', priced.promoError.message);
-      if (priced.minOrderShortfall > 0) throw new AppError('MIN_ORDER', `الحد الأدنى للطلب ${egp(priced.minOrderAmount)} ج.م`);
+      if (!isCounter && priced.minOrderShortfall > 0) throw new AppError('MIN_ORDER', `الحد الأدنى للطلب ${egp(priced.minOrderAmount)} ج.م`);
       // Admission is charged only for a new valid order, under the idempotency lock.
       // It commits with the order, so retries and rolled-back checkouts don't consume a phone allowance.
-      if (admit) await admit(tx);
-      const provisionalEta = computeEta({ confirmedAt: now, activeLoad: currentLive.load, orderLoad: priced.loadUnits, config: currentLive.config, extraDeliveryMinutes: point.extraMinutes });
+      if (opts.admit) await opts.admit(tx);
+      const provisionalEta = computeEta({ confirmedAt: now, activeLoad: currentLive.load, orderLoad: priced.loadUnits, config: currentLive.config, extraDeliveryMinutes: point.extraMinutes, pickup: point.kind === 'PICKUP' });
 
       const [counter] = await tx.update(storeCounters)
         .set({ orderSeq: sql`${storeCounters.orderSeq} + 1`, eventSeq: sql`${storeCounters.eventSeq} + 1` })
@@ -232,6 +256,9 @@ export async function createOrder(slug: string, input: CreateOrderInput, idempot
           deliveryPointId: point.id,
           deliveryPointName: point.nameAr,
           deliveryPointNameEn: point.nameEn,
+          fulfillment: point.kind,
+          channel: opts.channel,
+          createdByUserId: opts.createdByUserId ?? null,
           subtotal: priced.subtotal,
           discountTotal: priced.discount,
           deliveryFee: priced.deliveryFee,
@@ -290,8 +317,9 @@ export async function createOrder(slug: string, input: CreateOrderInput, idempot
         action: null,
         fromStatus: null,
         toStatus: status,
-        actorType: 'CUSTOMER',
-        data: { total: priced.total, items: priced.lines.length, source: input.source ?? null },
+        actorType: isCounter ? 'USER' : 'CUSTOMER',
+        actorUserId: opts.createdByUserId ?? null,
+        data: { total: priced.total, items: priced.lines.length, source: input.source ?? null, channel: opts.channel, fulfillment: point.kind },
         occurredAt: now,
       });
 
@@ -310,6 +338,65 @@ export async function createOrder(slug: string, input: CreateOrderInput, idempot
       const winner = await findByIdempotencyKey(d, r.id, idempotencyKey);
       if (winner) return replay(winner, requestHash);
     }
+    throw err;
+  }
+}
+
+export interface CounterOrderInput {
+  items: CreateOrderInput['items'];
+  customerName?: string | null;
+  customerPhone?: string | null;
+  note?: string | null;
+  paymentMethod: PaymentMethod;
+  deliveryPointId?: string | null;
+}
+
+/**
+ * Walk-in order entered at the register. It is created like any order (same pricing, snapshots,
+ * order number and event log) and then immediately accepted / marked paid by the staff member,
+ * so it goes straight into the kitchen queue with a real ETA.
+ */
+export async function createCounterOrder(
+  restaurantId: string,
+  input: CounterOrderInput,
+  idempotencyKey: string,
+  staff: { userId: string; name: string; auth: AuthzSnapshot; deviceId?: string | null; ip?: string | null; userAgent?: string | null },
+  now = new Date(),
+): Promise<CreatedOrder> {
+  const r = await getRestaurant(db(), restaurantId);
+  if (!r) throw new AppError('NOT_FOUND', 'المحل غير موجود');
+  if (!hasPermission(staff.auth, 'orders.create', r.id)) throw new AppError('FORBIDDEN', 'ليس لديك صلاحية لهذا الإجراء');
+  const created = await createOrderFor(
+    r,
+    {
+      items: input.items,
+      customerName: input.customerName?.trim() || 'عميل المحل',
+      customerPhone: input.customerPhone?.trim() || null,
+      note: input.note?.trim() || null,
+      paymentMethod: input.paymentMethod,
+      promoCode: null,
+      deliveryPointId: input.deliveryPointId ?? null,
+      source: 'counter',
+    },
+    idempotencyKey,
+    now,
+    { channel: 'COUNTER', createdByUserId: staff.userId },
+  );
+  if (created.replayed) return created;
+  // Cash: accepted on the spot (collected at hand-over). InstaPay: the cashier saw the transfer.
+  const action = input.paymentMethod === 'CASH' ? 'ACCEPT' : 'VERIFY_PAYMENT';
+  try {
+    const result = await applyOrderAction({
+      orderId: created.orderId,
+      action,
+      actor: { type: 'USER', userId: staff.userId, label: staff.name, auth: staff.auth, deviceId: staff.deviceId, ip: staff.ip, userAgent: staff.userAgent },
+      restaurantId: r.id,
+      now,
+    });
+    return { ...created, status: result.status };
+  } catch (err) {
+    // The order exists; it simply waits on the board for someone allowed to accept / verify it.
+    if (err instanceof AppError && err.code === 'FORBIDDEN') return created;
     throw err;
   }
 }

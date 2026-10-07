@@ -37,6 +37,8 @@ Platform:  Sales · commission ledger · settlements · queue engine · menus ·
 
 ## Operations quick reference
 
+- **Pickup at the restaurant:** every restaurant has a "Pickup at the restaurant" point next to its delivery points (the university gate stays the default). Pickup orders skip "out for delivery": ready → handed over at the counter; no delivery fee or travel time in the ETA; couriers don't see them.
+- **Counter orders (walk-ins):** Merchant → "Counter order" (permission `orders.create`: owner, manager, cashier). Big tap targets, optional name/phone, pickup preselected, cash or InstaPay-received. The order goes straight into the kitchen queue with an ETA; a double tap records one order. Online-only rules (opening hours, pause, minimum order) don't apply at the counter; a platform suspension does. Commission on counter orders is a per-restaurant setting.
 - **Suspend a restaurant:** Admin → Restaurant → Settings → "Suspend service" (with a reason). No new orders; customers and QR codes see a clear message; in-progress orders can be finished. "Resume service" undoes it.
 - **Block a person:** Admin → Team members → Block (or the owner: Staff → Block, for their own staff). Signs them out everywhere immediately.
 - **Returning customers:** the phone remembers name, phone, payment method and pickup point; "Order it again" refills the cart and opens a pre-filled checkout (2 taps).
