@@ -9,7 +9,7 @@ import { CounterOrder } from '@/components/merchant/counter-order';
 export const dynamic = 'force-dynamic';
 
 export default async function NewCounterOrderPage() {
-  const { restaurant, permissions } = await merchantContext('/merchant/new-order');
+  const { auth, restaurant, permissions } = await merchantContext('/merchant/new-order');
   if (!restaurant) return null;
   const locale = await getLocale('staff');
   if (!permissions.has('orders.create')) {
@@ -19,7 +19,9 @@ export default async function NewCounterOrderPage() {
   if (!menu) notFound();
   return (
     <CounterOrder
+      key={`${restaurant.id}:${auth.user.id}`}
       menu={menu}
+      userId={auth.user.id}
       restaurant={{ id: restaurant.id, nameAr: restaurant.nameAr, nameEn: restaurant.nameEn, timezone: restaurant.timezone }}
       canPrint={permissions.has('receipts.print')}
     />

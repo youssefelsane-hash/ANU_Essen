@@ -120,7 +120,7 @@ export async function updateRestaurantAction(_prev: ActionState, fd: FormData): 
       minOrderAmount: money(fd, 'minOrder')!,
       commissionBps: Math.round(commissionPercent * 100),
       requirePhone: bool(fd, 'requirePhone'),
-      counterCommissionEnabled: bool(fd, 'counterCommissionEnabled'),
+      counterCommissionEnabled: false,
       unpaidTimeoutMinutes: z.number().int().min(0).max(1440).parse(int(fd, 'unpaidTimeoutMinutes')),
       openingHours,
     };

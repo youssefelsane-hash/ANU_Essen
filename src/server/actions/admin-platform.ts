@@ -10,6 +10,7 @@ import type { AuthContext } from '../auth/authz';
 import { hashPassword, MIN_PASSWORD_LENGTH } from '../auth/password';
 import { AppError } from '../errors';
 import { audit } from '../services/audit';
+import { removeCourierAssignment } from '../services/couriers';
 import { optStr, requestMeta, runAction, str } from './util';
 import type { ActionState } from '../../lib/action-state';
 import { parseMoney } from '../../lib/domain/misc';
@@ -102,6 +103,13 @@ export async function removeRoleAction(assignmentId: string) {
     .where(eq(userRoles.id, assignmentId));
   if (!a) throw new AppError('NOT_FOUND');
   if (a.userId === auth.user.id && a.key === 'SUPER_ADMIN') throw new AppError('FORBIDDEN', 'You cannot remove your own super admin role');
+  if (a.key === 'DELIVERY_STAFF') {
+    await removeCourierAssignment({ assignmentId, origin: 'PLATFORM', actor: { auth, ...(await requestMeta()) } });
+    revalidatePath(`/admin/users/${a.userId}`);
+    revalidatePath('/admin/delivery');
+    revalidatePath('/merchant/staff');
+    return;
+  }
   await db().delete(userRoles).where(eq(userRoles.id, assignmentId));
   await audit({ actor: actor(auth), action: 'user.role_removed', entity: 'user', entityId: a.userId, restaurantId: a.restaurantId, before: { role: a.key } });
   revalidatePath(`/admin/users/${a.userId}`);

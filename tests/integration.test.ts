@@ -62,7 +62,7 @@ describe('order creation', () => {
     expect(b.replayed).toBe(true);
     expect(b.orderId).toBe(a.orderId);
     expect(a.orderNumber).toMatch(/^[A-Z]\d{3}$/);
-    expect(a.total).toBe(3 * 6000);
+    expect(a.total).toBe(3 * 6000 + 900);
     expect(a.status).toBe('AWAITING_PAYMENT');
 
     const k2 = key();
@@ -84,11 +84,11 @@ describe('order creation', () => {
     await d.update(s.restaurants).set({ commissionBps: 1000 }).where(eq(s.restaurants.id, demo.restaurantId));
     const [snap] = await loadOrderSnapshots(d, [o.orderId], { includePhone: true });
     expect(snap.items[0].unitPrice).toBe(6000);
-    expect(snap.total).toBe(18000);
+    expect(snap.total).toBe(18900);
     const [row] = await d.select().from(s.orders).where(eq(s.orders.id, o.orderId));
     expect(row.commissionBps).toBe(500);
     expect(row.commissionAmount).toBe(900);
-    expect(row.merchantNet).toBe(17100);
+    expect(row.merchantNet).toBe(18000);
     // restore
     await d.update(s.productVariants).set({ price: 6000 }).where(eq(s.productVariants.id, demo.variantIds['Chicken Shawarma Sandwich:Regular']));
     await d.update(s.restaurants).set({ commissionBps: 500 }).where(eq(s.restaurants.id, demo.restaurantId));
@@ -112,7 +112,7 @@ describe('order creation', () => {
     const [promo] = await d.select().from(s.promotions).where(eq(s.promotions.code, 'WELCOME10'));
     await d.update(s.promotions).set({ usageLimit: promo.usedCount + 1 }).where(eq(s.promotions.id, promo.id));
     const first = await createOrder(SLUG, input({ promoCode: 'welcome10' }, 2), key());
-    expect(first.total).toBe(12000 - 1200);
+    expect(first.total).toBe(12000 - 1200 + 540);
     await expectAppError(createOrder(SLUG, input({ promoCode: 'WELCOME10' }, 2), key()), 'PROMO_INVALID');
   });
 
@@ -171,15 +171,15 @@ describe('payment + kitchen flow', () => {
     expect(prep).toBeGreaterThan(cfg.basePrepMinutes);
   });
 
-  it('customer cannot cancel after the payment was verified; cash orders need acceptance', async () => {
+  it('customer cannot cancel once confirmed; cash automatically enters the queue', async () => {
     const o = await confirmedOrder(1);
     await expectAppError(applyOrderAction({ orderId: o.orderId, action: 'CANCEL', actor: customer }), 'FORBIDDEN');
     await expectAppError(applyOrderAction({ orderId: o.orderId, action: 'CANCEL', actor: user(kitchen) }), 'FORBIDDEN');
 
     const cash = await createOrder(SLUG, input({ paymentMethod: 'CASH' }), key());
-    expect(cash.status).toBe('CREATED');
-    await expectAppError(applyOrderAction({ orderId: cash.orderId, action: 'START_PREPARING', actor: user(kitchen) }), 'INVALID_TRANSITION');
-    expect((await applyOrderAction({ orderId: cash.orderId, action: 'ACCEPT', actor: user(cashier) })).status).toBe('CONFIRMED');
+    expect(cash.status).toBe('CONFIRMED');
+    await expectAppError(applyOrderAction({ orderId: cash.orderId, action: 'ACCEPT', actor: user(cashier) }), 'INVALID_TRANSITION');
+    expect((await applyOrderAction({ orderId: cash.orderId, action: 'MARK_READY', actor: user(kitchen) })).status).toBe('READY');
   });
 
   it('expires InstaPay orders that were never paid', async () => {

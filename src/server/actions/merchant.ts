@@ -13,6 +13,7 @@ import { hashPassword, MIN_PASSWORD_LENGTH } from '../auth/password';
 import { AppError } from '../errors';
 import { MERCHANT_STORE_COOKIE } from '../merchant-context';
 import { audit } from '../services/audit';
+import { removeCourierAssignment } from '../services/couriers';
 import { requestMeta, runAction, str } from './util';
 import { parseMoney } from '../../lib/domain/misc';
 import { PROTECTED_ROLE_KEYS } from '../../lib/domain/permissions';
@@ -173,6 +174,13 @@ export async function removeStaffRoleAction(assignmentId: string) {
   const auth = await requirePermission('staff.manage', a.restaurantId);
   if (a.userId === auth.user.id) throw new AppError('FORBIDDEN', 'You cannot remove your own role');
   if (PROTECTED_ROLE_KEYS.includes(a.roleKey) && !can(auth, 'platform.users')) throw new AppError('FORBIDDEN');
+  if (a.roleKey === 'DELIVERY_STAFF') {
+    await removeCourierAssignment({ assignmentId, origin: 'STORE', actor: { auth, ...(await requestMeta()) } });
+    revalidatePath('/merchant/staff');
+    revalidatePath('/admin/users');
+    revalidatePath('/admin/delivery');
+    return;
+  }
   await db().delete(userRoles).where(eq(userRoles.id, assignmentId));
   await audit({
     actor: { type: 'USER', userId: auth.user.id, label: auth.user.name },

@@ -1,0 +1,8 @@
+.merchant-mobile-nav { display: none; }
+@media (max-width: 760px) {
+  .merchant-desktop-nav { display: none; }
+  .merchant-mobile-nav { display: flex; min-width: 0; width: 100%; align-items: center; gap: 8px; min-height: 56px; padding: 8px 12px; }
+  .merchant-mobile-nav > details > div { max-height: calc(100dvh - 90px); overflow-y: auto; }
+}
+
+body.merchant-focus-mode .merchant-nav { display: none; }

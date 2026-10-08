@@ -16,27 +16,32 @@ export interface EngineState {
   store: StoreLive | null;
   serverOffset: number;
   authError: boolean;
+  /** The server explicitly revoked this restaurant scope. */
+  accessDenied?: boolean;
   notice: string | null;
   highlighted: Record<string, number>;
 }
 
 class NetworkError extends Error {}
-class AuthError extends Error {}
+class AuthError extends Error { constructor(readonly status: number) { super(status === 403 ? 'forbidden' : 'unauthenticated'); } }
 
 const DEVICE_KEY = 'merchant:deviceId';
 const POLL_MS = 3000;
 const KEEP_TERMINAL_MS = 24 * 3600_000;
 
-export function deviceId(): string {
+export function deviceId(scope = ''): string {
+  const key = scope ? `${DEVICE_KEY}:${scope}` : DEVICE_KEY;
   try {
-    let id = localStorage.getItem(DEVICE_KEY);
+    let id = localStorage.getItem(key);
     if (!id) {
       id = uuid();
-      localStorage.setItem(DEVICE_KEY, id);
+      localStorage.setItem(key, id);
     }
     return id;
   } catch {
-    return (globalThis as { __deviceId?: string }).__deviceId ??= uuid();
+    const memory = globalThis as { __merchantDeviceIds?: Record<string, string> };
+    const ids = memory.__merchantDeviceIds ??= {};
+    return ids[key] ??= uuid();
   }
 }
 
@@ -51,7 +56,7 @@ async function request<T>(url: string, init: RequestInit = {}, timeoutMs = 12_00
   } finally {
     clearTimeout(timer);
   }
-  if (res.status === 401) throw new AuthError('unauthenticated');
+  if (res.status === 401 || res.status === 403) throw new AuthError(res.status);
   if (res.status >= 500 || res.status === 429) throw new NetworkError(`server ${res.status}`);
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error((data as { error?: { message?: string } } | null)?.error?.message ?? `HTTP ${res.status}`);
@@ -115,7 +120,8 @@ export class MerchantEngine {
     private readonly permissions: ReadonlySet<string>,
     private readonly onAlert: (orders: OrderSnapshot[]) => void,
     private readonly getLocale: () => Locale = () => 'ar',
-  ) {}
+    private readonly pollMs = POLL_MS,
+  ) { this.backoff = pollMs; }
 
   subscribe = (cb: () => void) => {
     this.listeners.add(cb);
@@ -129,6 +135,7 @@ export class MerchantEngine {
   }
 
   async start() {
+    if (this.stopped) return;
     this.db = await openLocalDb(this.restaurantId, this.userId, this.permissions);
     if (this.stopped) {
       this.db.close();
@@ -141,6 +148,8 @@ export class MerchantEngine {
       readMeta(this.db, 'serverOffset', 0),
       readMeta(this.db, 'lastSyncAt', null),
     ]);
+    // A StrictMode cleanup or navigation can stop this instance while IndexedDB is reading.
+    if (this.stopped) return;
     const now = Date.now();
     for (const o of orders) {
       const finishedAt = o.completedAt ?? o.cancelledAt;
@@ -150,6 +159,7 @@ export class MerchantEngine {
         this.server.set(o.id, o);
       }
     }
+    if (this.stopped) return;
     this.outbox = outbox;
     this.lastQueuedAt = outbox.reduce((latest, entry) => Math.max(latest, entry.createdAt), 0);
     this.set({ ready: true, store, serverOffset, lastSyncAt, connectivity: navigator.onLine ? 'syncing' : 'offline' });
@@ -178,7 +188,7 @@ export class MerchantEngine {
 
   /** Records a staff action locally (durably) and syncs it when possible. Works fully offline. */
   async dispatch(orderId: string, action: OrderAction, payload?: { reason?: string }): Promise<boolean> {
-    if (this.stopped || !this.state.ready || this.dispatching.has(orderId)) return false;
+    if (this.stopped || this.state.accessDenied || this.state.authError || !this.state.ready || this.dispatching.has(orderId)) return false;
     const current = this.state.orders.find((o) => o.id === orderId);
     const fulfillment = current?.fulfillment ?? 'DELIVERY';
     if (!current || !nextStatus(current.status, action, fulfillment)) return false;
@@ -237,11 +247,24 @@ export class MerchantEngine {
         flushed = await this.flush();
       }
       await this.pull();
-      this.backoff = POLL_MS;
+      this.backoff = this.pollMs;
       this.set({ connectivity: flushed > 0 ? 'synced' : this.outbox.length ? 'syncing' : 'online', authError: false, lastSyncAt: Date.now() });
       void this.db.put('meta', Date.now(), 'lastSyncAt');
     } catch (err) {
-      if (err instanceof AuthError) this.set({ authError: true, connectivity: 'offline' });
+      if (err instanceof AuthError) {
+        // A positive denial (including a blocked/expired session's 401) hides cached customer data.
+        // Preserve the durable outbox so signing back in can safely reconcile previously saved work.
+        this.server.clear();
+        this.acked = [];
+        this.set({ accessDenied: err.status === 403, authError: true, orders: [], pending: {}, highlighted: {}, store: null, connectivity: 'offline' });
+        try {
+          const tx = this.db.transaction(['orders', 'meta'], 'readwrite');
+          await tx.objectStore('orders').clear();
+          await tx.objectStore('meta').put(0, 'cursor');
+          await tx.done;
+        } catch { /* Keep the revoked scope hidden even if this device cannot clear its disk cache. */ }
+        finally { if (err.status === 403) this.stop(); }
+      }
       else if (err instanceof NetworkError) this.set({ connectivity: 'offline' });
       else this.set({ notice: errorMessage('INTERNAL', this.getLocale(), (err as Error).message) });
       this.backoff = Math.min(this.backoff * 1.6, 15_000);
@@ -252,7 +275,7 @@ export class MerchantEngine {
           this.syncAgain = false;
           void this.syncNow();
         } else {
-          const delay = this.state.connectivity === 'offline' ? this.backoff : document.visibilityState === 'visible' ? POLL_MS : 10_000;
+          const delay = this.state.connectivity === 'offline' ? this.backoff : document.visibilityState === 'visible' ? this.pollMs : 10_000;
           this.timer = setTimeout(() => void this.syncNow(), delay);
         }
       }
@@ -263,15 +286,17 @@ export class MerchantEngine {
     let done = 0;
     for (let round = 0; round < 5 && this.outbox.length; round++) {
       const batch = [...this.outbox].sort((a, b) => a.createdAt - b.createdAt).slice(0, 50);
-      const res = await request<{ serverTime: number; results: ActionResult[] }>('/api/merchant/actions', {
+      const res = await request<{ serverTime: number; results: ActionResult[]; viewerUserId: string }>('/api/merchant/actions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           restaurantId: this.restaurantId,
-          deviceId: deviceId(),
+          actorUserId: this.userId,
+          deviceId: deviceId(`${this.restaurantId}:${this.userId}`),
           actions: batch.map(({ eventId, orderId, action, occurredAt, payload }) => ({ eventId, orderId, action, occurredAt, payload })),
         }),
       });
+      if (res.viewerUserId !== this.userId) throw new AuthError(401);
       let retry = false;
       const rejected: string[] = [];
       for (const r of res.results) {
@@ -301,9 +326,10 @@ export class MerchantEngine {
     const alerts: OrderSnapshot[] = [];
     for (let page = 0; page < 10; page++) {
       const started = Date.now();
-      const res = await request<SyncResponse>(
-        `/api/merchant/sync?restaurantId=${this.restaurantId}&deviceId=${deviceId()}&cursor=${cursor}`,
+      const res = await request<SyncResponse & { viewerUserId: string }>(
+        `/api/merchant/sync?restaurantId=${this.restaurantId}&actorUserId=${encodeURIComponent(this.userId)}&deviceId=${deviceId(`${this.restaurantId}:${this.userId}`)}&cursor=${cursor}`,
       );
+      if (res.viewerUserId !== this.userId) throw new AuthError(401);
       const serverOffset = Math.round(res.serverTime - (started + Date.now()) / 2);
 
       // Persist first (orders + cursor atomically), only then show them.
@@ -344,6 +370,8 @@ export class MerchantEngine {
 
   private isActionable(o: OrderSnapshot): boolean {
     if (o.status === 'AWAITING_PAYMENT') return false; // nothing to do until the customer pays
+    // Automatically confirmed cash orders must still notify the kitchen and cashier.
+    if (o.status === 'CONFIRMED' && (this.permissions.has('orders.view') || this.permissions.has('orders.kitchen') || this.permissions.has('*'))) return true;
     const action = primaryActionFor(o.status, o.fulfillment ?? 'DELIVERY');
     const def = action ? transitionFor(action, o.fulfillment ?? 'DELIVERY') : null;
     return !!def && (this.permissions.has(def.permission) || this.permissions.has('*'));

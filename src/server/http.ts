@@ -61,13 +61,13 @@ export function route<Ctx>(handler: (req: Request, ctx: Ctx, meta: RequestMeta) 
   };
 }
 
-/** CSRF defence for cookie-authenticated mutations: the Origin must match the host. */
+/** Cookie-authenticated mutations require the same protocol, host and port. */
 export function assertSameOrigin(req: Request) {
   const origin = req.headers.get('origin');
+  if (req.headers.get('sec-fetch-site') === 'cross-site') throw new AppError('FORBIDDEN', 'Cross-origin request blocked');
   if (!origin) return; // non-browser clients (no ambient cookies are sent cross-site without Origin)
-  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host');
   try {
-    if (new URL(origin).host !== host) throw new AppError('FORBIDDEN', 'Cross-origin request blocked');
+    if (new URL(origin).origin !== origin || origin !== new URL(req.url).origin) throw new AppError('FORBIDDEN', 'Cross-origin request blocked');
   } catch (e) {
     if (e instanceof AppError) throw e;
     throw new AppError('FORBIDDEN', 'Bad origin');

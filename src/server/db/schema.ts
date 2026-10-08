@@ -7,8 +7,10 @@
  * NOTE: relative imports only (drizzle-kit loads this file directly).
  */
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
+  check,
   customType,
   date,
   index,
@@ -22,8 +24,9 @@ import {
   unique,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { FULFILLMENTS, ORDER_CHANNELS, ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES } from '../../lib/domain/order-machine';
-import { PROMOTION_TYPES } from '../../lib/domain/pricing';
+import { PROMOTION_TYPES, PRICING_MODES } from '../../lib/domain/pricing';
 import type { WeeklyHours } from '../../lib/domain/hours';
 import type { QueueConfig } from '../../lib/domain/queue';
 
@@ -43,6 +46,7 @@ export const roleScopeEnum = pgEnum('role_scope', ['PLATFORM', 'STORE']);
 export const promotionTypeEnum = pgEnum('promotion_type', PROMOTION_TYPES);
 export const actorTypeEnum = pgEnum('actor_type', ['CUSTOMER', 'USER', 'SYSTEM']);
 export const fulfillmentEnum = pgEnum('fulfillment', FULFILLMENTS);
+export const pricingModeEnum = pgEnum('pricing_mode', PRICING_MODES);
 export const refundStatusEnum = pgEnum('refund_status', ['REQUESTED', 'COMPLETED', 'REJECTED']);
 export const orderChannelEnum = pgEnum('order_channel', ORDER_CHANNELS);
 
@@ -128,7 +132,7 @@ export const restaurants = pgTable('restaurants', {
   openingHours: jsonb('opening_hours').$type<WeeklyHours | null>(),
   minOrderAmount: integer('min_order_amount').notNull().default(0),
   commissionBps: integer('commission_bps').notNull().default(500),
-  /** Charge platform commission on walk-in orders entered at the counter too. */
+  /** Historical configuration only. New COUNTER_NO_FEE orders always have zero platform share. */
   counterCommissionEnabled: boolean('counter_commission_enabled').notNull().default(true),
   requirePhone: boolean('require_phone').notNull().default(true),
   unpaidTimeoutMinutes: integer('unpaid_timeout_minutes').notNull().default(20),
@@ -443,6 +447,9 @@ export const orders = pgTable(
     deliveryFee: integer('delivery_fee').notNull().default(0),
     total: integer('total').notNull(),
     currency: text('currency').notNull(),
+    /** Historical rows are never repriced when the platform switches to customer-funded fees. */
+    pricingMode: pricingModeEnum('pricing_mode').notNull().default('LEGACY_COMMISSION'),
+    platformFeeAmount: integer('platform_fee_amount').notNull().default(0),
     commissionBps: integer('commission_bps').notNull(),
     commissionAmount: integer('commission_amount').notNull(),
     merchantNet: integer('merchant_net').notNull(),
@@ -475,6 +482,7 @@ export const orders = pgTable(
     index('orders_restaurant_created_idx').on(t.restaurantId, t.createdAt),
     index('orders_created_idx').on(t.createdAt),
     index('orders_customer_idx').on(t.customerId),
+    index('orders_courier_completed_idx').on(t.restaurantId, t.assignedToUserId, t.completedAt),
   ],
 );
 
@@ -621,6 +629,30 @@ export const refunds = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [index('refunds_order_idx').on(t.orderId), index('refunds_restaurant_status_idx').on(t.restaurantId, t.status)],
+);
+
+/** Physical cash received from a courier. Corrections append an exact reversal; history is immutable. */
+export const courierCashEntries = pgTable(
+  'courier_cash_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    restaurantId: uuid('restaurant_id').notNull().references(() => restaurants.id, { onDelete: 'restrict' }),
+    courierUserId: uuid('courier_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+    entryKind: text('entry_kind').$type<'HAND_IN' | 'REVERSAL'>().notNull(),
+    /** Positive piasters. REVERSAL restores this amount to the courier's outstanding cash. */
+    amount: integer('amount').notNull(),
+    reversesEntryId: uuid('reverses_entry_id').references((): AnyPgColumn => courierCashEntries.id, { onDelete: 'restrict' }),
+    idempotencyKey: uuid('idempotency_key').notNull().unique(),
+    note: text('note'),
+    recordedByUserId: uuid('recorded_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique('courier_cash_entries_reversal_uq').on(t.reversesEntryId),
+    index('courier_cash_entries_pair_created_idx').on(t.restaurantId, t.courierUserId, t.createdAt),
+    check('courier_cash_entries_positive_amount', sql`${t.amount} > 0`),
+    check('courier_cash_entries_kind_valid', sql`(${t.entryKind} = 'HAND_IN' and ${t.reversesEntryId} is null) or (${t.entryKind} = 'REVERSAL' and ${t.reversesEntryId} is not null)`),
+  ],
 );
 
 /** Images uploaded by restaurants (product photos). Small, compressed on the phone before upload. */

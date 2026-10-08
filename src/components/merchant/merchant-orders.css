@@ -1,0 +1,98 @@
+.merchant-board { min-width: 0; width: 100%; background: #f2f4f1; }
+.merchant-order-toolbar { min-width: 0; padding: 16px; background: #fff; border-bottom: 1px solid #dce3dd; }
+.merchant-compact-toolbar { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.merchant-compact-toolbar > .badge { font-size: 12px; padding: 6px 9px; }
+.merchant-compact-toolbar .merchant-connection { margin-inline-end: auto; }
+.merchant-tool-button { display: inline-flex; width: 42px; min-height: 42px; flex-shrink: 0; align-items: center; justify-content: center; border: 1px solid #dae2d9; border-radius: 11px; background: #f8faf6; color: #314d38; cursor: pointer; }
+.merchant-tool-button.sound-on { border-color: #c2d9bc; background: #eaf4e5; color: #2c692f; }
+.merchant-tool-button.sound-off { border-color: #edd598; background: #fff8df; color: #866219; }
+.merchant-tools-menu { position: relative; flex-shrink: 0; }
+.merchant-tools-menu > summary { list-style: none; }
+.merchant-tools-menu > summary::-webkit-details-marker { display: none; }
+.merchant-tools-panel { position: absolute; inset-inline-end: 0; top: 100%; z-index: 25; width: 320px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 100px); margin-top: 10px; overflow-y: auto; border: 1px solid #d9e3d7; border-radius: 16px; background: #fff; box-shadow: 0 12px 35px #172c2220; padding: 16px; }
+.merchant-toolbar-main, .merchant-device-controls, .merchant-toolbar-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.merchant-toolbar-main { justify-content: space-between; }
+.merchant-toolbar-status { margin-top: 12px; font-size: 13px; }
+.merchant-device-controls { margin-top: 12px; }
+.merchant-device-controls > button { min-height: 46px; flex: 1 1 150px; white-space: normal; }
+.merchant-availability { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); min-width: 0; border: 1px solid #d7dfd8; border-radius: 12px; overflow: hidden; }
+.merchant-availability button { min-height: 46px; padding: 9px 12px; font-weight: 700; font-size: 13px; }
+.merchant-live-state { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.merchant-live-state .badge { white-space: normal; }
+.merchant-connection { max-width: 100%; min-height: 44px; white-space: normal; text-align: start; }
+.merchant-order-tabs { position: sticky; top: 0; z-index: 15; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 10px 12px; border-bottom: 1px solid #dde3dd; background: #fffffff5; backdrop-filter: blur(12px); }
+.merchant-order-tabs.is-courier { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.merchant-order-tabs button { display: flex; min-width: 0; min-height: 61px; flex-direction: column; justify-content: center; align-items: center; gap: 4px; border-radius: 12px; font-size: 12px; font-weight: 800; line-height: 1.35; text-align: center; }
+.merchant-order-tabs button.is-selected { background: #183e2b; color: #fff; }
+.merchant-order-tabs button:not(.is-selected) { background: #f0f4ef; color: #48604f; }
+.merchant-order-tabs button b { font-size: 20px; line-height: 1; }
+.merchant-board-grid { display: grid; min-width: 0; gap: 14px; padding: 14px; }
+.merchant-order-column { min-width: 0; border-top-width: 4px; border-radius: 18px; background: #e9eee8; }
+.merchant-column-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px; font-size: 18px; font-weight: 800; }
+.merchant-column-content { display: flex; min-width: 0; flex-direction: column; gap: 14px; padding: 0 10px 12px; }
+.merchant-order-card { min-width: 0; border: 1px solid #dbe3db; border-radius: 18px; background: #fff; box-shadow: 0 2px 5px #172c2206; padding: 18px; overflow-wrap: anywhere; }
+.merchant-order-card.is-new { border: 2px solid #c38c23; box-shadow: 0 0 0 3px #f7df9e70; }
+.merchant-order-card.is-unpaid { background: #fffdf8; }
+.merchant-order-heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.merchant-order-number { font-size: clamp(30px, 8vw, 40px); font-weight: 900; line-height: 1.1; letter-spacing: -.035em; overflow-wrap: anywhere; }
+.merchant-order-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+.merchant-order-badges .badge { min-height: 28px; max-width: 100%; padding: 5px 9px; font-size: 12px; white-space: normal; }
+.merchant-order-customer { margin-top: 16px; padding-top: 14px; border-top: 1px solid #edf0ed; }
+.merchant-order-customer strong { display: block; font-size: 22px; line-height: 1.4; }
+.merchant-order-phone { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 50px; margin-top: 10px; padding: 10px 12px; border: 1px solid #cddfcf; border-radius: 12px; background: #f3f8f1; color: #225b37; font-weight: 800; font-size: 19px; }
+.merchant-order-phone small { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-family: inherit; }
+.merchant-order-items { margin-top: 16px; display: flex; flex-direction: column; gap: 13px; border-top: 1px dashed #dce3db; border-bottom: 1px dashed #dce3db; padding: 15px 0; }
+.merchant-order-items > li { display: grid; grid-template-columns: 43px minmax(0, 1fr); align-items: start; gap: 10px; }
+.merchant-item-quantity { display: grid; min-width: 43px; min-height: 43px; place-items: center; border-radius: 12px; background: #183e2b; color: #fff; font-weight: 900; font-size: 23px; line-height: 1; }
+.merchant-item-name { font-size: 19px; font-weight: 800; line-height: 1.5; }
+.merchant-item-options { display: block; margin-top: 3px; color: #596b5c; font-size: 15px; line-height: 1.6; }
+.merchant-item-note { margin-top: 5px; border-radius: 8px; background: #fff7e5; padding: 6px 8px; color: #8b5511; font-size: 15px; font-weight: 700; }
+.merchant-order-destination { margin-top: 14px; padding: 12px; border-radius: 12px; background: #f3f5f2; }
+.merchant-order-destination small { display: block; color: #657365; font-size: 12px; }
+.merchant-order-destination strong { display: block; margin-top: 4px; font-size: 17px; line-height: 1.6; }
+.merchant-order-total { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 13px; font-size: 16px; }
+.merchant-order-total strong { font-size: 22px; }
+.merchant-order-primary { min-height: 62px; font-size: 19px; line-height: 1.4; white-space: normal; }
+.merchant-order-card details summary { min-height: 44px; }
+.merchant-courier-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 12px 14px; background: #eeedf9; color: #36305d; }
+.merchant-courier-totals > div { min-width: 0; border-radius: 12px; padding: 10px; background: #ffffffb0; }
+.merchant-courier-totals small { display: block; font-size: 12px; }
+.merchant-courier-totals b { display: block; margin-top: 3px; font-size: 21px; overflow-wrap: anywhere; }
+.merchant-courier-totals details { grid-column: 1 / -1; }
+.merchant-new-orders { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: #f8e7b3; color: #674914; font-size: 15px; font-weight: 800; }
+.merchant-finished-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 12px; padding: 14px 0; font-size: 14px; }
+.merchant-finished-row > * { min-width: 0; }
+.merchant-finished-row .badge { white-space: normal; }
+.merchant-empty-orders { padding: 32px 16px; text-align: center; color: #6b7c6c; font-size: 15px; }
+.merchant-board:fullscreen { overflow-y: auto; background: #f2f4f1; }
+.merchant-board.is-focus .merchant-order-card { padding: 22px; }
+.merchant-board.is-focus .merchant-item-name { font-size: 23px; }
+.merchant-board.is-focus .merchant-item-quantity { min-height: 48px; font-size: 27px; }
+.merchant-board.is-focus .is-kitchen .merchant-order-badges,
+.merchant-board.is-focus .is-kitchen .merchant-order-destination,
+.merchant-board.is-focus .is-kitchen .merchant-order-total,
+.merchant-board.is-focus .is-kitchen .merchant-order-timing,
+.merchant-board.is-focus .is-kitchen .merchant-order-age { display: none; }
+.merchant-board.is-focus .is-kitchen .merchant-order-customer { margin-top: 10px; padding-top: 10px; }
+.merchant-board.is-focus .merchant-new-orders { display: none; }
+@media (min-width: 1100px) { .merchant-order-tabs { display: none; } .merchant-board-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; } .merchant-board-grid.is-courier { grid-template-columns: repeat(2, minmax(0, 1fr)); } .merchant-order-column { display: block !important; } .merchant-device-controls { justify-content: flex-end; } .merchant-device-controls > button { flex: 0 1 auto; } .merchant-courier-totals { grid-template-columns: repeat(4, minmax(0, 1fr)); } .merchant-courier-totals details { grid-column: auto; } .merchant-board.is-focus .merchant-board-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .merchant-order-toolbar { padding: 12px; } .merchant-toolbar-main > .merchant-live-state { flex-basis: 100%; } .merchant-availability { width: 100%; } .merchant-availability button { padding: 8px 4px; font-size: 12px; } .merchant-toolbar-main > a { width: 100%; } .merchant-board-grid { padding: 10px; } .merchant-column-content { padding: 0 8px 10px; } .merchant-order-card { padding: 15px; } .merchant-order-phone { font-size: 18px; } .merchant-order-tabs { padding: 8px 10px; gap: 5px; } .merchant-order-tabs button { font-size: 11px; } .merchant-order-card.is-new { box-shadow: 0 0 0 2px #f7df9e70; } }
+
+/* Couriers need the destination, amount and next action before the item detail. */
+@media (max-width: 1099px) {
+  .merchant-board.is-focus.is-courier .merchant-courier-totals,
+  .merchant-board.is-focus.is-courier .merchant-order-age,
+  .merchant-board.is-focus.is-courier .merchant-order-badges,
+  .merchant-board.is-focus.is-courier .merchant-order-total,
+  .merchant-board.is-focus.is-courier .merchant-assigned-courier,
+  .merchant-board.is-focus.is-courier .merchant-delivery-estimate { display: none; }
+  .merchant-board.is-focus.is-courier .merchant-order-card { display: flex; flex-direction: column; padding: 18px; }
+  .merchant-board.is-focus.is-courier .merchant-order-heading { order: 0; }
+  .merchant-board.is-focus.is-courier .merchant-order-customer { order: 1; margin-top: 8px; padding-top: 8px; }
+  .merchant-board.is-focus.is-courier .merchant-order-destination { order: 2; margin-top: 12px; padding: 10px; }
+  .merchant-board.is-focus.is-courier .merchant-order-collection { order: 3; }
+  .merchant-board.is-focus.is-courier .merchant-order-primary { order: 4; }
+  .merchant-board.is-focus.is-courier .merchant-order-card > .merchant-item-note { order: 5; }
+  .merchant-board.is-focus.is-courier .merchant-order-items { order: 6; }
+  .merchant-board.is-focus.is-courier .merchant-order-card > details { order: 7; }
+}

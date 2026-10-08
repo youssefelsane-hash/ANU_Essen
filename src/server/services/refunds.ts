@@ -89,7 +89,13 @@ export async function recordRefund(input: RecordRefundInput) {
     if (!Number.isInteger(amount) || amount <= 0 || amount > remaining) {
       throw new AppError('VALIDATION', 'مبلغ الاسترداد لازم يكون أكبر من صفر ومش أكتر من المتبقي', { remaining });
     }
-    const commissionReversed = commissionReversedFor(order, amount);
+    const [prior] = await tx.select({ reversed: sql<number>`coalesce(sum(${refunds.commissionReversed}), 0)::int` })
+      .from(refunds).where(and(eq(refunds.orderId, order.id), eq(refunds.status, 'COMPLETED')));
+    const alreadyReversed = Number(prior?.reversed ?? 0);
+    // Cumulative allocation prevents repeated penny refunds from creating or losing fee revenue.
+    // Existing refund snapshots stay untouched; the last refund reverses only the actual remainder.
+    const targetReversed = commissionReversedFor(order, order.refundedTotal + amount);
+    const commissionReversed = Math.max(0, Math.min(amount, order.commissionAmount - alreadyReversed, targetReversed - alreadyReversed));
     const values = {
       status: 'COMPLETED' as const,
       amount,

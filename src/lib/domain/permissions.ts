@@ -26,8 +26,10 @@ export const PERMISSIONS = {
   'menu.availability': { scope: 'STORE', description: 'Toggle product availability' },
   'menu.manage': { scope: 'STORE', description: 'Edit menu, prices, banners and promotions' },
   'store.status': { scope: 'STORE', description: 'Open / pause / close ordering' },
+  'store.profile': { scope: 'STORE', description: 'Edit the restaurant name, logo, photos and brand appearance' },
   'staff.manage': { scope: 'STORE', description: 'Manage restaurant staff accounts' },
   'reports.view': { scope: 'STORE', description: 'See restaurant sales reports and order history' },
+  'couriers.cash': { scope: 'STORE', description: 'Receive and correct courier cash hand-ins for this restaurant' },
   'audit.view': { scope: 'STORE', description: 'See audit logs of the restaurant' },
 } as const satisfies Record<string, { scope: PermissionScope; description: string }>;
 
@@ -76,6 +78,7 @@ export const SYSTEM_ROLES: readonly SystemRoleDef[] = [
       'menu.availability',
       'menu.manage',
       'store.status',
+      'store.profile',
       'reports.view',
     ],
   },

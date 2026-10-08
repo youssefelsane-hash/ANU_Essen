@@ -6,7 +6,7 @@ import { db } from '../db';
 import { users } from '../db/schema';
 import { hashPassword, verifyPassword } from '../auth/password';
 import { createSession, destroySession } from '../auth/session';
-import { loadAuthz } from '../auth/authz';
+import { loadAuthz, staffHomePath } from '../auth/authz';
 import { hitRateLimit } from '../rate-limit';
 import { audit } from '../services/audit';
 import { requestMeta } from './util';
@@ -47,7 +47,7 @@ export async function loginAction(_prev: ActionState, fd: FormData): Promise<Act
 
   const auth = await loadAuthz(db(), { id: user.id, name: user.name, email: user.email });
   const safeNext = safeInternalPath(next);
-  redirect(safeNext ?? (auth.isPlatform ? '/admin' : '/merchant'));
+  redirect(safeNext ?? staffHomePath(auth));
 }
 
 export async function logoutAction() {

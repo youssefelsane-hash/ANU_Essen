@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
-import { merchantContext } from '@/server/merchant-context';
+import { merchantContext, storePermissionsFor } from '@/server/merchant-context';
 import { ServiceWorkerRegister } from '@/components/sw-register';
 import { getLocale } from '@/lib/i18n/server';
 import { text } from '@/lib/i18n';
@@ -35,11 +35,15 @@ export default async function MerchantLayout({ children }: { children: React.Rea
     );
   }
   const refundRequests = permissions.has('payments.refund') ? await openRefundRequestCount(db(), restaurant.id) : 0;
+  const canDeliver = restaurants.some((store) => storePermissionsFor(auth, store.id).includes('orders.delivery'));
   const links = [
+    { href: '/merchant/delivery', ar: 'طلبات التوصيل', en: 'Deliveries', show: canDeliver },
+    { href: '/merchant/couriers', ar: 'حسابات الديليفري', en: 'Courier accounts', show: permissions.has('couriers.cash') || auth.platformPermissions.has('platform.finance') },
     { href: '/merchant', ar: 'الطلبات', en: 'Orders', show: permissions.has('orders.view') || permissions.has('orders.delivery') },
     { href: '/merchant/new-order', ar: 'طلب من الكاشير', en: 'Counter order', show: permissions.has('orders.create') },
     { href: '/merchant/dashboard', ar: 'ملخص اليوم', en: 'Today', show: permissions.has('reports.view') },
     { href: '/merchant/menu', ar: 'الأصناف والأسعار', en: 'Menu & prices', show: permissions.has('menu.availability') || permissions.has('menu.manage') },
+    { href: '/merchant/appearance', ar: 'اسم وشكل المطعم', en: 'Restaurant appearance', show: permissions.has('store.profile') },
     { href: '/merchant/refunds', ar: 'الاسترداد', en: 'Refunds', show: permissions.has('payments.refund'), count: refundRequests },
     { href: '/merchant/staff', ar: 'الفريق', en: 'Team', show: permissions.has('staff.manage') },
   ];

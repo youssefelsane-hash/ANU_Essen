@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db';
-import { orders, refunds, restaurants, settlements, users } from '../db/schema';
+import { courierCashEntries, orders, refunds, restaurants, roles, settlements, userRoles, users } from '../db/schema';
 import { ACTIVE_STATUSES, type OrderStatus } from '../../lib/domain/order-machine';
 
 const money = (col: unknown) => sql<number>`coalesce(sum(${col}), 0)::float8`;
@@ -178,20 +178,90 @@ export async function salesBySource(d: Db, from: Date, to: Date, restaurantId?: 
   return rows.map((r) => ({ source: r.source, orders: Number(r.orders), completed: Number(r.completed), sales: Number(r.sales) }));
 }
 
-/** Per-courier hand-over summary for a day: who delivered what, and how much cash they should hand in. */
-export async function courierSummary(d: Db, restaurantId: string, from: Date, to: Date) {
-  const rows = await d
+/**
+ * Cash is a physical liability, separate from restaurant/platform revenue and customer refunds.
+ * A refund recorded by the restaurant does not mean the courier paid it from their own cash bag.
+ * `period` changes collection/refund activity only; outstanding always covers the complete ledger.
+ * Internal query: callers must enforce the viewer's restaurant/courier scope.
+ */
+export async function courierAccounting(d: Db, restaurantId?: string, courierUserId?: string, period?: { from: Date; to: Date }) {
+  const orderScope = [
+    eq(orders.fulfillment, 'DELIVERY'),
+    sql`${orders.assignedToUserId} is not null`,
+    ...(restaurantId ? [eq(orders.restaurantId, restaurantId)] : []),
+    ...(courierUserId ? [eq(orders.assignedToUserId, courierUserId)] : []),
+  ];
+  const completedPeriod = period ? and(gte(orders.completedAt, period.from), lt(orders.completedAt, period.to))! : sql`true`;
+  const refundPeriod = period ? [gte(refunds.decidedAt, period.from), lt(refunds.decidedAt, period.to)] : [];
+  const [rows, cashRows, refundRows, grants] = await Promise.all([
+    d
     .select({
+      restaurantId: orders.restaurantId,
+      restaurantNameAr: restaurants.nameAr,
+      restaurantNameEn: restaurants.nameEn,
       userId: orders.assignedToUserId,
       name: users.name,
       onTheWay: sql<number>`count(*) filter (where ${orders.status} in ('OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE'))::int`,
-      delivered: sql<number>`count(*) filter (where ${orders.status} = 'COMPLETED')::int`,
-      cashCollected: sql<number>`coalesce(sum(${orders.total}) filter (where ${orders.status} = 'COMPLETED' and ${orders.paymentMethod} = 'CASH'), 0)::float8`,
+      delivered: sql<number>`count(*) filter (where ${orders.status} = 'COMPLETED' and ${completedPeriod})::int`,
+      cashCollected: sql<number>`coalesce(sum(${orders.total}) filter (where ${orders.status} = 'COMPLETED' and ${orders.paymentMethod} = 'CASH' and ${completedPeriod}), 0)::float8`,
+      cashCollectedAllTime: sql<number>`coalesce(sum(${orders.total}) filter (where ${orders.status} = 'COMPLETED' and ${orders.paymentMethod} = 'CASH'), 0)::float8`,
+      merchantShare: sql<number>`coalesce(sum(${orders.merchantNet}) filter (where ${orders.status} = 'COMPLETED' and ${orders.paymentMethod} = 'CASH' and ${completedPeriod}), 0)::float8`,
+      platformShare: sql<number>`coalesce(sum(${orders.commissionAmount}) filter (where ${orders.status} = 'COMPLETED' and ${orders.paymentMethod} = 'CASH' and ${completedPeriod}), 0)::float8`,
       cashPending: sql<number>`coalesce(sum(${orders.total}) filter (where ${orders.status} in ('OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE') and ${orders.paymentMethod} = 'CASH'), 0)::float8`,
     })
     .from(orders)
+    .innerJoin(restaurants, eq(restaurants.id, orders.restaurantId))
     .leftJoin(users, eq(users.id, orders.assignedToUserId))
-    .where(and(eq(orders.restaurantId, restaurantId), gte(orders.createdAt, from), lt(orders.createdAt, to), sql`${orders.assignedToUserId} is not null`))
-    .groupBy(orders.assignedToUserId, users.name);
-  return rows.map((r) => ({ userId: r.userId!, name: r.name ?? '—', onTheWay: Number(r.onTheWay), delivered: Number(r.delivered), cashCollected: Number(r.cashCollected), cashPending: Number(r.cashPending) }));
+    .where(and(...orderScope))
+    .groupBy(orders.restaurantId, restaurants.nameAr, restaurants.nameEn, orders.assignedToUserId, users.name),
+    d.select({
+      restaurantId: courierCashEntries.restaurantId,
+      userId: courierCashEntries.courierUserId,
+      restaurantNameAr: restaurants.nameAr,
+      restaurantNameEn: restaurants.nameEn,
+      name: users.name,
+      handedIn: sql<number>`coalesce(sum(case when ${courierCashEntries.entryKind} = 'HAND_IN' then ${courierCashEntries.amount} else -${courierCashEntries.amount} end), 0)::float8`,
+    }).from(courierCashEntries)
+      .innerJoin(restaurants, eq(restaurants.id, courierCashEntries.restaurantId))
+      .innerJoin(users, eq(users.id, courierCashEntries.courierUserId))
+      .where(and(
+        ...(restaurantId ? [eq(courierCashEntries.restaurantId, restaurantId)] : []),
+        ...(courierUserId ? [eq(courierCashEntries.courierUserId, courierUserId)] : []),
+      ))
+      .groupBy(courierCashEntries.restaurantId, courierCashEntries.courierUserId, restaurants.nameAr, restaurants.nameEn, users.name),
+    d.select({
+      restaurantId: orders.restaurantId, userId: orders.assignedToUserId,
+      amount: sql<number>`coalesce(sum(${refunds.amount}), 0)::float8`,
+    }).from(refunds).innerJoin(orders, eq(orders.id, refunds.orderId))
+      .where(and(...orderScope, eq(orders.status, 'COMPLETED'), eq(orders.paymentMethod, 'CASH'), eq(refunds.status, 'COMPLETED'), ...refundPeriod))
+      .groupBy(orders.restaurantId, orders.assignedToUserId),
+    d.select({ restaurantId: userRoles.restaurantId, userId: users.id, name: users.name, restaurantNameAr: restaurants.nameAr, restaurantNameEn: restaurants.nameEn })
+      .from(userRoles).innerJoin(roles, eq(roles.id, userRoles.roleId)).innerJoin(users, eq(users.id, userRoles.userId)).innerJoin(restaurants, eq(restaurants.id, userRoles.restaurantId))
+      .where(and(eq(roles.key, 'DELIVERY_STAFF'),
+        ...(restaurantId ? [eq(userRoles.restaurantId, restaurantId)] : []),
+        ...(courierUserId ? [eq(userRoles.userId, courierUserId)] : []),
+      )),
+  ]);
+  const pairs = new Map<string, { restaurantId: string; userId: string; name: string; restaurantNameAr: string; restaurantNameEn: string }>();
+  for (const r of [...grants, ...cashRows, ...rows]) {
+    if (r.restaurantId && r.userId) pairs.set(`${r.restaurantId}:${r.userId}`, { ...r, restaurantId: r.restaurantId, userId: r.userId, name: r.name ?? '—' });
+  }
+  return [...pairs.values()].map((pair) => {
+    const r = rows.find((x) => x.restaurantId === pair.restaurantId && x.userId === pair.userId);
+    const handedIn = Number(cashRows.find((x) => x.restaurantId === pair.restaurantId && x.userId === pair.userId)?.handedIn ?? 0);
+    const cashRefunds = Number(refundRows.find((x) => x.restaurantId === pair.restaurantId && x.userId === pair.userId)?.amount ?? 0);
+    const cashCollectedAllTime = Number(r?.cashCollectedAllTime ?? 0);
+    return {
+      ...pair,
+      onTheWay: Number(r?.onTheWay ?? 0), delivered: Number(r?.delivered ?? 0),
+      cashCollected: Number(r?.cashCollected ?? 0), cashCollectedAllTime,
+      cashPending: Number(r?.cashPending ?? 0), merchantShare: Number(r?.merchantShare ?? 0), platformShare: Number(r?.platformShare ?? 0),
+      cashRefunds, handedIn, outstanding: cashCollectedAllTime - handedIn,
+    };
+  }).sort((a, b) => a.restaurantNameEn.localeCompare(b.restaurantNameEn) || a.name.localeCompare(b.name));
+}
+
+/** Collections belong to the day completed, not the day the order was created. */
+export async function courierSummary(d: Db, restaurantId: string, from: Date, to: Date) {
+  return courierAccounting(d, restaurantId, undefined, { from, to });
 }

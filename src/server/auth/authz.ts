@@ -58,3 +58,13 @@ export async function loadAuthz(d: Db, user: AuthUser): Promise<AuthContext> {
 export function can(auth: AuthzSnapshot | null | undefined, permission: string, restaurantId?: string | null): boolean {
   return !!auth && hasPermission(auth, permission, restaurantId);
 }
+
+/** Couriers open the combined delivery workspace even with a single assigned restaurant. */
+export function isDeliveryOnly(auth: AuthContext): boolean {
+  return !auth.isPlatform && auth.storePermissions.size > 0 && [...auth.storePermissions.values()].every((permissions) =>
+    permissions.has('orders.delivery') && !permissions.has('orders.view') && !permissions.has('orders.kitchen') && !permissions.has('orders.create'));
+}
+
+export function staffHomePath(auth: AuthContext): string {
+  return auth.isPlatform ? '/admin' : isDeliveryOnly(auth) ? '/merchant/delivery' : '/merchant';
+}

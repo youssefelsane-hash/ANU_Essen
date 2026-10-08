@@ -45,7 +45,8 @@ describe('acceptance scenario (spec §46)', () => {
     // 3–4. Selects 3 sandwiches; the cart total is computed by the server.
     const items = [{ productId: sandwich.id, variantId: regular.id, addonIds: [], quantity: 3 }];
     const q = await quote('alrayez', { items });
-    expect(q.total).toBe(3 * regular.price);
+    expect(q.total).toBe(3 * regular.price + 900);
+    expect(q.platformFeeAmount).toBe(900);
 
     // Device bootstraps before the order exists.
     const boot = await merchantSync({ auth: cashier, restaurantId, deviceId: tablet, cursor: 0 });
@@ -128,7 +129,8 @@ describe('acceptance scenario (spec §46)', () => {
 
     // 25. Platform commission appears for the super admin (5% snapshot).
     const finance = (await financeByRestaurant(d, dayStart, dayEnd)).find((f) => f.restaurantId === restaurantId)!;
-    expect(finance.period.commission).toBe(Math.round(q.total * 0.05));
+    expect(finance.period.commission).toBe(q.platformFeeAmount);
+    expect(finance.period.merchantNet).toBe(q.subtotal);
     expect(finance.allTime.outstanding).toBe(finance.allTime.commission);
 
     // 26. Audit logs show the important actions.

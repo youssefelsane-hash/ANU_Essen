@@ -37,7 +37,7 @@ export async function OrderDetail({
           </div>
         </div>
         <div className="text-sm text-gray-600">
-          {o.customerName} {o.customerPhone && <span dir="ltr">• {o.customerPhone}</span>} • {localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}
+          {o.customerName} {o.customerPhone && <a className="inline-flex min-h-11 items-center rounded-lg px-2 font-bold text-emerald-800 underline" dir="ltr" href={'tel:' + o.customerPhone}>☎ {o.customerPhone}</a>} • {localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}
         </div>
         {o.customerNote && <p className="rounded-lg bg-yellow-50 p-2 text-sm">📝 {o.customerNote}</p>}
         <div className="overflow-x-auto"><table className="table">
@@ -60,12 +60,13 @@ export async function OrderDetail({
         <div className="ms-auto max-w-xs space-y-1 text-sm">
           <div className="flex justify-between"><span>{t('المجموع', 'Subtotal')}</span><span>{money(o.subtotal)}</span></div>
           {o.discountTotal > 0 && <div className="flex justify-between text-green-700"><span>{t('الخصم', 'Discount')} {o.promoCode ? `(${o.promoCode})` : ''}</span><span>-{money(o.discountTotal)}</span></div>}
+          {(o.platformFeeAmount ?? 0) > 0 && <div className="flex justify-between"><span>{t('رسوم المنصة', 'Platform fee')}</span><span>{money(o.platformFeeAmount ?? 0)}</span></div>}
           {o.deliveryFee > 0 && <div className="flex justify-between"><span>{t('التوصيل', 'Delivery')}</span><span>{money(o.deliveryFee)}</span></div>}
           <div className="flex justify-between text-base font-extrabold"><span>{t('الإجمالي', 'Total')}</span><span>{money(o.total)}</span></div>
           {(o.refundedTotal ?? 0) > 0 && <div className="flex justify-between font-semibold text-amber-800"><span>{t('مسترد للعميل', 'Refunded')}</span><span>-{money(o.refundedTotal ?? 0)}</span></div>}
           {commission && (
             <div className="mt-2 rounded-lg bg-indigo-50 p-2 text-xs text-indigo-900">
-              {t('عمولة المنصة', 'Platform commission')} {(commission.bps / 100).toFixed(2)}% = {money(commission.amount)} • {t('صافي المطعم', 'Restaurant net')} {money(commission.merchantNet)}
+              {o.pricingMode === 'ONLINE_PLATFORM_FEE' ? t('رسوم المنصة المضافة', 'Added platform fee') : t('عمولة المنصة السابقة', 'Legacy platform commission')} {(commission.bps / 100).toFixed(2)}% = {money(commission.amount)} • {t('صافي المطعم', 'Restaurant net')} {money(commission.merchantNet)}
               {commission.source && <> • {t('مصدر الطلب', 'Order source')}: {commission.source}</>}
             </div>
           )}

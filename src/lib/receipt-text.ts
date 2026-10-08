@@ -31,6 +31,7 @@ export function receiptText(order: OrderSnapshot, restaurantName: string, timeZo
   }
   out.push(line, row(t('المجموع', 'Subtotal'), formatMoney(order.subtotal, locale)));
   if (order.discountTotal) out.push(row(t('الخصم', 'Discount'), `-${formatMoney(order.discountTotal, locale)}`));
+  if (order.platformFeeAmount) out.push(row(t('رسوم المنصة', 'Platform fee'), formatMoney(order.platformFeeAmount, locale)));
   if (order.deliveryFee) out.push(row(t('التوصيل', 'Delivery'), formatMoney(order.deliveryFee, locale)));
   out.push(row(t('الإجمالي', 'TOTAL'), formatMoney(order.total, locale)));
   if (order.refundedTotal) out.push(row(t('مسترد للعميل', 'Refunded'), `-${formatMoney(order.refundedTotal, locale)}`));

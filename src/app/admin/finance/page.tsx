@@ -52,7 +52,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label={t("مبيعات الفترة (بعد المرتجعات)", "Sales after refunds (period)")} value={m(sum((r) => r.period.sales))} />
         <Stat label={t("مرتجعات الفترة", "Refunds (period)")} value={m(sum((r) => r.period.refunds))} />
-        <Stat label={t("عمولة الفترة", "Platform commission (period)")} value={m(sum((r) => r.period.commission))} />
+        <Stat label={t("حصة المنصة للفترة", "Platform earnings (period)")} value={m(sum((r) => r.period.commission))} />
         <Stat label={t("إجمالي ما تم تحصيله", "Commission paid (all time)")} value={m(sum((r) => r.allTime.paid))} />
         <Stat label={t("عمولة مستحقة", "Commission outstanding")} value={m(sum((r) => r.allTime.outstanding))} />
       </div>
@@ -78,7 +78,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
             ))}
           </tbody>
         </table>
-        <p className="mt-2 text-xs text-gray-500">{t("تُحسب العمولة بعد خصم الخصومات، وبالنسبة المحفوظة وقت الطلب. تُسجل بعد التسليم.", "Commission = (subtotal − discount) × the rate snapshotted on each order. Counted when the order is completed.")}</p>
+        <p className="mt-2 text-xs text-gray-500">{t("رسوم الأونلاين تُضاف فوق سعر المطعم بعد الخصم ولا تخصم منه. الطلبات القديمة تحتفظ بحساب عمولتها السابق. تُحتسب المبالغ بعد التسليم والاسترداد.", "Online fees are added above the restaurant price after discounts. Legacy orders retain their original commission. Totals account for completed orders and refunds.")}</p>
       </section>
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="card">
