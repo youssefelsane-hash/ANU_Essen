@@ -254,7 +254,7 @@ export function StoreMenu({ menu: initialMenu }: { menu: PublicMenu }) {
   );
 }
 
-function ProductSheet({ menu, product, onClose, onAdd }: {
+export function ProductSheet({ menu, product, onClose, onAdd }: {
   menu: PublicMenu; product: PublicMenuProduct; onClose: () => void;
   onAdd: (variantId: string | null, addonIds: string[], qty: number) => void;
 }) {

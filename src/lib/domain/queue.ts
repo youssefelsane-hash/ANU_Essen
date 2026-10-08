@@ -3,6 +3,7 @@
  * and editable only by platform admins — nothing here is hardcoded business policy.
  */
 import { z } from 'zod';
+import type { FulfillmentType } from './order-machine';
 
 export const capacityRuleSchema = z.object({
   maxLoad: z.number().int().min(0).max(100_000),
@@ -107,6 +108,7 @@ export interface EtaInput {
   config: QueueConfig;
   /** Extra delivery minutes for the delivery point (e.g. a farther gate). */
   extraDeliveryMinutes?: number;
+  fulfillmentType?: FulfillmentType;
 }
 
 export interface EtaResult {
@@ -121,7 +123,7 @@ export interface EtaResult {
 export function computeEta(input: EtaInput): EtaResult {
   const projectedLoad = Math.max(0, input.activeLoad) + Math.max(0, input.orderLoad);
   const prepMinutes = prepMinutesForLoad(projectedLoad, input.config);
-  const deliveryMinutes = input.config.deliveryMinutes + (input.extraDeliveryMinutes ?? 0);
+  const deliveryMinutes = input.fulfillmentType === 'PICKUP' ? 0 : input.config.deliveryMinutes + (input.extraDeliveryMinutes ?? 0);
   const start = input.confirmedAt.getTime();
   const readyAt = new Date(start + prepMinutes * 60_000);
   return {

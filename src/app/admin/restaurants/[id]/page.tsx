@@ -105,15 +105,17 @@ export default async function RestaurantSettingsPage({ params }: { params: Promi
             </ActionForm>
           </section>
           <section className="card">
-            <h2 className="mb-3 font-bold">{t("أماكن الاستلام", "Delivery points")}</h2>
+            <h2 className="mb-3 font-bold">{t("الاستلام والتوصيل", "Pickup and delivery")}</h2>
             <div className="space-y-4">
               {[...points, null].map((p, i) => (
                 <ActionForm key={p?.id ?? `new-${i}`} action={saveDeliveryPointAction} className="grid gap-2 rounded-xl bg-gray-50 p-3 sm:grid-cols-2">
                   <input type="hidden" name="restaurantId" value={r.id} />
                   <input type="hidden" name="id" value={p?.id ?? ''} />
-                  <div className="text-xs font-semibold text-gray-500 sm:col-span-2">{p ? t("مكان الاستلام", "Delivery point") : t("إضافة مكان استلام", "Add delivery point")}</div>
+                  <div className="text-xs font-semibold text-gray-500 sm:col-span-2">{p ? t("مكان الاستلام", "Fulfillment point") : t("إضافة مكان استلام", "Add fulfillment point")}</div>
                   <input aria-label={t("اسم مكان الاستلام بالعربي", "Pickup name in Arabic")} name="nameAr" defaultValue={p?.nameAr ?? ''} placeholder={t("الاسم بالعربي", "Name (Arabic)")} className="input" dir="rtl" required />
                   <input aria-label={t("اسم مكان الاستلام بالإنجليزي", "Pickup name in English")} name="nameEn" defaultValue={p?.nameEn ?? ''} placeholder={t("الاسم بالإنجليزي", "Name (English)")} className="input" required />
+                  <Field label={t("طريقة الاستلام", "Fulfillment type")}><select name="fulfillmentType" className="input" defaultValue={p?.fulfillmentType ?? 'DELIVERY'}><option value="DELIVERY">{t("توصيل إلى نقطة الاستلام", "Delivery to collection point")}</option><option value="PICKUP">{t("استلام من المطعم", "Collect from restaurant")}</option></select></Field>
+                  <p className="text-xs text-gray-500">{t("استلام المطعم بدون رسوم توصيل أو وقت انتقال. الجامعة هي الاختيار الافتراضي للطلب أونلاين ويمكنك تغييره.", "Restaurant pickup has no delivery fee or travel time. University delivery is the initial online default and can be changed.")}</p>
                   <Field label={t("رسوم التوصيل بالجنيه", "Delivery fee (EGP)")}><input name="deliveryFee" defaultValue={(p?.deliveryFee ?? 0) / 100} className="input" /></Field>
                   <Field label={t("وقت توصيل إضافي بالدقائق", "Extra delivery minutes")}><input name="extraMinutes" defaultValue={p?.extraMinutes ?? 0} className="input" /></Field>
                   <input type="hidden" name="sortOrder" value={p?.sortOrder ?? points.length} />

@@ -10,6 +10,7 @@ import {
   bigint,
   boolean,
   customType,
+  check,
   date,
   index,
   integer,
@@ -22,7 +23,8 @@ import {
   unique,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES } from '../../lib/domain/order-machine';
+import { sql } from 'drizzle-orm';
+import { ORDER_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, type FulfillmentType } from '../../lib/domain/order-machine';
 import { PROMOTION_TYPES } from '../../lib/domain/pricing';
 import type { WeeklyHours } from '../../lib/domain/hours';
 import type { QueueConfig } from '../../lib/domain/queue';
@@ -175,6 +177,7 @@ export const deliveryPoints = pgTable(
     nameAr: text('name_ar').notNull(),
     nameEn: text('name_en').notNull(),
     description: text('description'),
+    fulfillmentType: text('fulfillment_type').$type<FulfillmentType>().notNull().default('DELIVERY'),
     deliveryFee: integer('delivery_fee').notNull().default(0),
     extraMinutes: integer('extra_minutes').notNull().default(0),
     isDefault: boolean('is_default').notNull().default(false),
@@ -182,7 +185,7 @@ export const deliveryPoints = pgTable(
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: createdAt(),
   },
-  (t) => [index('delivery_points_restaurant_idx').on(t.restaurantId)],
+  (t) => [index('delivery_points_restaurant_idx').on(t.restaurantId), check('delivery_points_fulfillment_type_check', sql`${t.fulfillmentType} in ('PICKUP', 'DELIVERY')`)],
 );
 
 export interface PaymentMethodConfig {
@@ -422,9 +425,11 @@ export const orders = pgTable(
     status: orderStatusEnum('status').notNull(),
     paymentMethod: paymentMethodEnum('payment_method').notNull(),
     paymentStatus: paymentStatusEnum('payment_status').notNull(),
+    cashReceivedAtCounter: boolean('cash_received_at_counter').notNull().default(false),
     deliveryPointId: uuid('delivery_point_id').references(() => deliveryPoints.id, { onDelete: 'set null' }),
     deliveryPointName: text('delivery_point_name').notNull(),
     deliveryPointNameEn: text('delivery_point_name_en'),
+    fulfillmentType: text('fulfillment_type').$type<FulfillmentType>().notNull().default('DELIVERY'),
     subtotal: integer('subtotal').notNull(),
     discountTotal: integer('discount_total').notNull().default(0),
     deliveryFee: integer('delivery_fee').notNull().default(0),
@@ -457,6 +462,7 @@ export const orders = pgTable(
   },
   (t) => [
     unique('orders_restaurant_seq_uq').on(t.restaurantId, t.orderSeq),
+    check('orders_fulfillment_type_check', sql`${t.fulfillmentType} in ('PICKUP', 'DELIVERY')`),
     unique('orders_idempotency_uq').on(t.restaurantId, t.idempotencyKey),
     index('orders_restaurant_status_idx').on(t.restaurantId, t.status),
     index('orders_restaurant_created_idx').on(t.restaurantId, t.createdAt),

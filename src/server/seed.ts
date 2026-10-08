@@ -88,6 +88,7 @@ export async function bootstrapRestaurant(
   d: Db,
   data: { slug: string; nameAr: string; nameEn: string; commissionBps?: number; phone?: string | null; badgeText?: string | null; badgeTextEn?: string | null; taglineAr?: string | null; taglineEn?: string | null; brandColor?: string; logoUrl?: string | null; coverImageUrl?: string | null },
   queue: QueueConfig = DEFAULT_QUEUE_CONFIG,
+  options: { defaultPoints?: boolean } = {},
 ) {
   const brand = restaurantBrandSchema.parse(data);
   return d.transaction(async (tx) => {
@@ -100,6 +101,10 @@ export async function bootstrapRestaurant(
     await tx.insert(restaurantPaymentMethods).values([
       { restaurantId: r.id, method: 'INSTAPAY', isEnabled: false, config: {}, sortOrder: 0 },
       { restaurantId: r.id, method: 'CASH', isEnabled: true, config: {}, sortOrder: 1 },
+    ]);
+    if (options.defaultPoints) await tx.insert(deliveryPoints).values([
+      { restaurantId: r.id, nameAr: 'بوابة الباركينج — جامعة الإسكندرية الأهلية', nameEn: 'University Parking Gate', fulfillmentType: 'DELIVERY', description: 'Alexandria National University — parking gate', isDefault: true, sortOrder: 0 },
+      { restaurantId: r.id, nameAr: 'استلام من المطعم', nameEn: 'Collect from restaurant', fulfillmentType: 'PICKUP', sortOrder: 1 },
     ]);
     return r;
   });
@@ -134,7 +139,7 @@ export async function seedDemoRestaurant(d: Db, opts: { demoPassword?: string | 
     };
   }
 
-  const r = await bootstrapRestaurant(d, { slug, nameAr: 'الراية الدمشقية', nameEn: 'Al Raya Al Dimashqia', badgeText: 'الراية', badgeTextEn: 'Al Raya', taglineAr: 'من قلب الشام، لحد عندك', taglineEn: 'From the heart of Damascus, to you', brandColor: '#163d35', coverImageUrl: '/images/restaurant-hero.webp', commissionBps: 500 });
+  const r = await bootstrapRestaurant(d, { slug, nameAr: 'الراية الدمشقية', nameEn: 'Al Raya Al Dimashqia', badgeText: 'الراية', badgeTextEn: 'Al Raya', taglineAr: 'من قلب الشام، لحد عندك', taglineEn: 'From the heart of Damascus, to you', brandColor: '#163d35', coverImageUrl: '/images/restaurant-hero.webp', commissionBps: 500 }, DEFAULT_QUEUE_CONFIG, { defaultPoints: true });
   await d
     .update(restaurantPaymentMethods)
     .set({
@@ -148,14 +153,6 @@ export async function seedDemoRestaurant(d: Db, opts: { demoPassword?: string | 
       },
     })
     .where(and(eq(restaurantPaymentMethods.restaurantId, r.id), eq(restaurantPaymentMethods.method, 'INSTAPAY')));
-
-  await d.insert(deliveryPoints).values({
-    restaurantId: r.id,
-    nameAr: 'بوابة الباركينج — جامعة الإسكندرية الأهلية',
-    nameEn: 'University Parking Gate',
-    description: 'Alexandria National University — parking gate',
-    isDefault: true,
-  });
 
   const [sandwiches, meals, sides, drinks] = await d
     .insert(categories)

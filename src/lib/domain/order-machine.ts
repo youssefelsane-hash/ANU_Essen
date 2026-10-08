@@ -21,6 +21,9 @@ export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export const PAYMENT_METHODS = ['INSTAPAY', 'CASH'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
+export const FULFILLMENT_TYPES = ['PICKUP', 'DELIVERY'] as const;
+export type FulfillmentType = (typeof FULFILLMENT_TYPES)[number];
+
 export const PAYMENT_STATUSES = [
   'UNPAID',
   'PAYMENT_SUBMITTED',
@@ -92,7 +95,11 @@ export function isTerminal(status: OrderStatus): boolean {
 }
 
 /** Returns the next status for an action, or null if the transition is not allowed. */
-export function nextStatus(current: OrderStatus, action: OrderAction): OrderStatus | null {
+export function nextStatus(current: OrderStatus, action: OrderAction, fulfillmentType: FulfillmentType = 'DELIVERY'): OrderStatus | null {
+  if (fulfillmentType === 'PICKUP') {
+    if (action === 'OUT_FOR_DELIVERY' || action === 'MARK_ARRIVED') return null;
+    if (action === 'COMPLETE') return current === 'READY' ? 'COMPLETED' : null;
+  }
   const def = TRANSITIONS[action];
   if (!def) return null;
   return def.from.includes(current) ? def.to : null;
@@ -103,10 +110,12 @@ export function actorMayPerform(
   action: OrderAction,
   current: OrderStatus,
   hasPermission: (permission: string) => boolean,
+  fulfillmentType: FulfillmentType = 'DELIVERY',
 ): boolean {
   const def = TRANSITIONS[action];
   if (actor === 'SYSTEM') return def.systemAllowed === true;
   if (actor === 'CUSTOMER') return def.customerFrom?.includes(current) ?? false;
+  if (fulfillmentType === 'PICKUP' && action === 'COMPLETE') return hasPermission('orders.accept');
   return hasPermission(def.permission);
 }
 
@@ -138,7 +147,7 @@ export function initialStatusFor(method: PaymentMethod): { status: OrderStatus; 
 }
 
 /** The main "next step" button for staff screens, in priority order. */
-export function primaryActionFor(status: OrderStatus): OrderAction | null {
+export function primaryActionFor(status: OrderStatus, fulfillmentType: FulfillmentType = 'DELIVERY'): OrderAction | null {
   switch (status) {
     case 'CREATED':
       return 'ACCEPT';
@@ -150,7 +159,7 @@ export function primaryActionFor(status: OrderStatus): OrderAction | null {
     case 'PREPARING':
       return 'MARK_READY';
     case 'READY':
-      return 'OUT_FOR_DELIVERY';
+      return fulfillmentType === 'PICKUP' ? 'COMPLETE' : 'OUT_FOR_DELIVERY';
     case 'OUT_FOR_DELIVERY':
       return 'MARK_ARRIVED';
     case 'ARRIVED_AT_GATE':

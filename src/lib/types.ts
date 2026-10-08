@@ -1,5 +1,5 @@
 /** DTOs shared by the server and the browser apps. Dates travel as epoch milliseconds. */
-import type { OrderAction, OrderStatus, PaymentMethod, PaymentStatus } from './domain/order-machine';
+import type { OrderAction, OrderStatus, PaymentMethod, PaymentStatus, FulfillmentType } from './domain/order-machine';
 import type { LoadLevel } from './domain/queue';
 import type { EffectiveStatus, StatusReason } from './domain/store-status';
 
@@ -34,12 +34,14 @@ export interface OrderSnapshot {
   status: OrderStatus;
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
+  cashReceivedAtCounter?: boolean;
   paymentReference: string | null;
   paymentRejectedReason: string | null;
   hasPaymentAttachment: boolean;
   customerName: string;
   customerPhone: string | null;
   customerNote: string | null;
+  fulfillmentType?: FulfillmentType;
   deliveryPointName: string;
   deliveryPointNameEn?: string | null;
   items: SnapshotItem[];
@@ -114,9 +116,11 @@ export interface TrackingView {
     status: OrderStatus;
     paymentMethod: PaymentMethod;
     paymentStatus: PaymentStatus;
+    cashReceivedAtCounter?: boolean;
     paymentReference: string | null;
     paymentRejectedReason: string | null;
     customerName: string;
+    fulfillmentType?: FulfillmentType;
     deliveryPointName: string;
     deliveryPointNameEn?: string | null;
     items: SnapshotItem[];
@@ -178,10 +182,11 @@ export interface PublicMenu {
   addonGroups: { id: string; nameAr: string; nameEn?: string; minSelect: number; maxSelect: number; addons: { id: string; nameAr: string; nameEn?: string; price: number; isAvailable: boolean }[] }[];
   banners: { id: string; titleAr: string; titleEn?: string | null; subtitleAr: string | null; subtitleEn?: string | null; imageUrl: string | null; bgColor: string; textColor: string }[];
   paymentMethods: { method: PaymentMethod }[];
-  deliveryPoints: { id: string; nameAr: string; nameEn: string; isDefault: boolean; deliveryFee: number }[];
+  deliveryPoints: { id: string; fulfillmentType?: FulfillmentType; nameAr: string; nameEn: string; isDefault: boolean; deliveryFee: number }[];
 }
 
 export interface QuoteResponse {
+  fulfillmentType?: FulfillmentType;
   lines: {
     productId: string;
     variantId: string | null;

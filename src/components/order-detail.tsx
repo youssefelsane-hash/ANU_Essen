@@ -4,6 +4,7 @@ import type { OrderSnapshot } from '@/lib/types';
 import { PrintButton } from './merchant/receipt';
 import { labels, localizedName, text } from '@/lib/i18n';
 import { getLocale } from '@/lib/i18n/server';
+import { customerLabel } from '@/lib/customer-label';
 
 /** Shared order detail (merchant + admin). Commission is passed only to platform viewers. */
 export async function OrderDetail({
@@ -34,8 +35,9 @@ export async function OrderDetail({
           </div>
         </div>
         <div className="text-sm text-gray-600">
-          {o.customerName} {o.customerPhone && <span dir="ltr">• {o.customerPhone}</span>} • {localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}
+          {customerLabel(o.customerName, locale)} {o.customerPhone && <span dir="ltr">• {o.customerPhone}</span>} • {localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}
         </div>
+        {o.fulfillmentType === 'PICKUP' && <p className="rounded-lg bg-green-50 p-2 text-sm font-bold text-green-900">{t('استلام من المحل — يتسلّم العميل الطلب من الكاشير بعد التجهيز.', 'Restaurant pickup — the customer collects from the cashier when ready.')}</p>}
         {o.customerNote && <p className="rounded-lg bg-yellow-50 p-2 text-sm">📝 {o.customerNote}</p>}
         <div className="overflow-x-auto"><table className="table">
           <thead><tr><th>{t('العدد', 'Qty')}</th><th>{t('الصنف', 'Item')}</th><th>{t('سعر الوحدة', 'Unit price')}</th><th>{t('الإجمالي', 'Total')}</th></tr></thead>

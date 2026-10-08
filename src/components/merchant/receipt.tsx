@@ -7,6 +7,7 @@ import { formatDateTime, formatMoney } from '@/lib/domain/misc';
 import { useLanguage } from '@/components/language-provider';
 import { labels, localizedName } from '@/lib/i18n';
 import type { OrderSnapshot } from '@/lib/types';
+import { customerLabel } from '@/lib/customer-label';
 
 export function Receipt({ order, restaurantName, timezone }: { order: OrderSnapshot; restaurantName: string; timezone: string }) {
   const { locale, t } = useLanguage();
@@ -18,7 +19,7 @@ export function Receipt({ order, restaurantName, timezone }: { order: OrderSnaps
       <div className="big" dir="ltr">#{order.orderNumber}</div>
       <div className="muted" style={{ textAlign: 'center' }} dir="ltr">{formatDateTime(order.createdAt, timezone, locale)}</div>
       <hr />
-      <div>{t('العميل', 'Customer')}: <b>{order.customerName}</b></div>
+      <div>{t('العميل', 'Customer')}: <b>{customerLabel(order.customerName, locale)}</b></div>
       {order.customerPhone && <div dir="ltr" style={{ textAlign: locale === 'ar' ? 'right' : 'left' }}>{order.customerPhone}</div>}
       <hr />
       {order.items.map((it) => (
@@ -46,7 +47,7 @@ export function Receipt({ order, restaurantName, timezone }: { order: OrderSnaps
         {t('الدفع', 'Payment')}: {copy.paymentMethod[order.paymentMethod]} —{' '}
         <b>{paid ? t('مدفوع ✓', 'PAID ✓') : order.paymentMethod === 'CASH' ? t(`يُحصّل ${formatMoney(order.total, locale)}`, `Collect ${formatMoney(order.total, locale)}`) : t('لم يتم تأكيد الدفع', 'Payment not confirmed')}</b>
       </div>
-      <div>{t('الاستلام', 'Pickup point')}: <b>{localizedName(locale, order.deliveryPointName, order.deliveryPointNameEn)}</b></div>
+      <div>{order.fulfillmentType === 'PICKUP' ? t('استلام من المحل', 'Restaurant pickup') : t('الاستلام', 'Pickup point')}: <b>{localizedName(locale, order.deliveryPointName, order.deliveryPointNameEn)}</b></div>
       {order.customerNote && <div>{t('ملاحظة', 'Note')}: {order.customerNote}</div>}
       <hr />
       <div className="muted" style={{ textAlign: 'center' }}>{t('شكرًا لطلبك ♥', 'Thank you for your order ♥')}</div>

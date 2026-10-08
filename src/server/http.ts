@@ -2,7 +2,7 @@ import { ZodError } from 'zod';
 import { AppError } from './errors';
 import { log, reportError } from './log';
 import { PricingError } from '../lib/domain/pricing';
-import { errorMessage, languageScope, LANGUAGE_COOKIES, resolveLocale, type Locale } from '../lib/i18n';
+import { errorMessage, languageScope, LANGUAGE_COOKIES, resolveLocale, type Locale, type LanguageScope } from '../lib/i18n';
 
 export interface RequestMeta {
   requestId: string;
@@ -39,6 +39,11 @@ export function errorResponse(err: unknown, requestId: string, locale: Locale = 
   return json({ error: { code: 'INTERNAL', message: errorMessage('INTERNAL', locale), requestId } }, { status: 500 });
 }
 
+export function requestLocale(req: Request, scope: LanguageScope = languageScope(new URL(req.url).pathname)): Locale {
+  const preference = req.headers.get('cookie')?.split(';').map((cookie) => cookie.trim()).find((cookie) => cookie.startsWith(`${LANGUAGE_COOKIES[scope]}=`))?.split('=')[1];
+  return resolveLocale(scope, preference, req.headers.get('accept-language'));
+}
+
 /** Route wrapper: request id, structured access log, uniform error mapping. */
 export function route<Ctx>(handler: (req: Request, ctx: Ctx, meta: RequestMeta) => Promise<Response>) {
   return async (req: Request, ctx: Ctx): Promise<Response> => {
@@ -48,9 +53,7 @@ export function route<Ctx>(handler: (req: Request, ctx: Ctx, meta: RequestMeta) 
     try {
       res = await handler(req, ctx, { requestId, ip: clientIp(req), userAgent: req.headers.get('user-agent') });
     } catch (err) {
-      const scope = languageScope(new URL(req.url).pathname);
-      const pref = req.headers.get('cookie')?.split(';').map((cookie) => cookie.trim()).find((cookie) => cookie.startsWith(`${LANGUAGE_COOKIES[scope]}=`))?.split('=')[1];
-      res = errorResponse(err, requestId, resolveLocale(scope, pref, req.headers.get('accept-language')));
+      res = errorResponse(err, requestId, requestLocale(req));
     }
     res.headers.set('x-request-id', requestId);
     const fields = { requestId, method: req.method, path: new URL(req.url).pathname, status: res.status, ms: Date.now() - started };
@@ -61,13 +64,13 @@ export function route<Ctx>(handler: (req: Request, ctx: Ctx, meta: RequestMeta) 
   };
 }
 
-/** CSRF defence for cookie-authenticated mutations: the Origin must match the host. */
+/** Cookie mutations require the same protocol, host and port, including rejection of opaque origins. */
 export function assertSameOrigin(req: Request) {
   const origin = req.headers.get('origin');
+  if (req.headers.get('sec-fetch-site') === 'cross-site') throw new AppError('FORBIDDEN', 'Cross-origin request blocked');
   if (!origin) return; // non-browser clients (no ambient cookies are sent cross-site without Origin)
-  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host');
   try {
-    if (new URL(origin).host !== host) throw new AppError('FORBIDDEN', 'Cross-origin request blocked');
+    if (new URL(origin).origin !== origin || origin !== new URL(req.url).origin) throw new AppError('FORBIDDEN', 'Cross-origin request blocked');
   } catch (e) {
     if (e instanceof AppError) throw e;
     throw new AppError('FORBIDDEN', 'Bad origin');

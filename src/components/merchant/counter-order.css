@@ -1,0 +1,26 @@
+.counter-page { max-width: 1400px; margin: 0 auto; padding: 24px; }
+.counter-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: 24px; align-items: start; }
+.counter-search { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: #fff; border: 1px solid #dce3dd; border-radius: 14px; }
+.counter-search input { min-width: 0; width: 100%; outline: none; }
+.counter-products { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.counter-product { display: flex; min-height: 125px; flex-direction: column; justify-content: space-between; gap: 20px; border: 1px solid #dce3dd; border-radius: 16px; background: #fff; padding: 16px; text-align: start; transition: border-color .15s, box-shadow .15s; }
+.counter-product:hover:not(:disabled) { border-color: #1b5734; box-shadow: 0 2px 10px #172c2210; }
+.counter-product:disabled { opacity: .5; }
+.counter-product-top, .counter-product-bottom { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.counter-product-top strong { font-size: 16px; line-height: 1.5; }
+.counter-product-bottom { color: #1a4930; }
+.counter-product-bottom > span { display: grid; place-items: center; min-width: 32px; min-height: 32px; border-radius: 10px; background: #edf3ed; }
+.counter-product-count { flex-shrink: 0; display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; background: #1b5734; color: #fff; font-size: 13px; }
+.counter-basket { min-width: 0; }
+.counter-lines { max-height: 360px; overflow-y: auto; }
+.counter-line { padding: 12px 0; border-bottom: 1px dashed #e2e6e2; }
+.counter-line-unavailable { background: #fff1f1; padding: 12px; border-radius: 10px; }
+.counter-quantity { display: grid; place-items: center; min-width: 36px; height: 36px; border: 1px solid #dce3dd; border-radius: 10px; }
+.counter-quantity:disabled { opacity: .4; }
+.counter-choice { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 12px; border: 1px solid #e1e6e1; border-radius: 12px; cursor: pointer; }
+.counter-choice.is-selected { border-color: #297442; background: #f3f8f2; }
+.counter-choice input { width: 18px; height: 18px; flex-shrink: 0; accent-color: #1b5734; }
+.counter-choice span { font-size: 14px; font-weight: 600; line-height: 1.5; }
+.counter-choice small { display: block; margin-top: 3px; color: #637068; font-size: 12px; font-weight: 400; }
+@media (max-width: 1100px) { .counter-products { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .counter-page { padding: 16px; } .counter-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; } .counter-product { min-height: 115px; padding: 14px; } }

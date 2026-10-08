@@ -11,6 +11,7 @@ import { hitRateLimit } from '../rate-limit';
 import { audit } from '../services/audit';
 import { requestMeta } from './util';
 import type { ActionState } from '../../lib/action-state';
+import { safeLocalRedirect } from '../../lib/domain/safe-redirect';
 
 let dummyHash: Promise<string> | null = null;
 
@@ -43,7 +44,7 @@ export async function loginAction(_prev: ActionState, fd: FormData): Promise<Act
   await audit({ actor: { type: 'USER', userId: user.id, label: user.name }, action: 'auth.login', entity: 'user', entityId: user.id, ip: meta.ip, userAgent: meta.userAgent });
 
   const auth = await loadAuthz(db(), { id: user.id, name: user.name, email: user.email });
-  const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : null;
+  const safeNext = safeLocalRedirect(next);
   redirect(safeNext ?? (auth.isPlatform ? '/admin' : '/merchant'));
 }
 

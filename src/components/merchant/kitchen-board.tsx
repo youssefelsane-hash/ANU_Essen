@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { MerchantEngine, type EngineState } from '@/client/merchant/engine';
 import { getPaperWidth, setPaperWidth, type PaperWidth } from '@/client/merchant/printing';
 import { formatMoney, formatTime } from '@/lib/domain/misc';
-import { isTerminal, primaryActionFor, TRANSITIONS, type OrderAction, type OrderStatus } from '@/lib/domain/order-machine';
+import { actorMayPerform, isTerminal, primaryActionFor, type OrderAction, type OrderStatus } from '@/lib/domain/order-machine';
+import { customerLabel } from '@/lib/customer-label';
 import { PAYMENT_STATUS_TONE } from '@/lib/labels';
 import { useLanguage } from '@/components/language-provider';
 import { labels, localizedName, localizeMessage, text, type Locale } from '@/lib/i18n';
@@ -143,7 +144,7 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
     try {
       navigator.vibrate?.([200, 100, 200]);
       if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
-        for (const o of orders.slice(0, 3)) new Notification(`${t('طلب', 'Order')} #${o.orderNumber} — ${copy.status[o.status]}`, { body: `${o.customerName} • ${formatMoney(o.total, locale)}`, tag: o.id });
+        for (const o of orders.slice(0, 3)) new Notification(`${t('طلب', 'Order')} #${o.orderNumber} — ${copy.status[o.status]}`, { body: `${customerLabel(o.customerName, locale)} • ${formatMoney(o.total, locale)}`, tag: o.id });
       }
     } catch {
       /* ignore */
@@ -173,19 +174,20 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
     [engine],
   );
 
-  const active = state.orders.filter((o) => !isTerminal(o.status));
-  const recentDone = state.orders
+  const visibleOrders = deliveryOnly ? state.orders.filter((o) => o.fulfillmentType !== 'PICKUP') : state.orders;
+  const active = visibleOrders.filter((o) => !isTerminal(o.status));
+  const recentDone = visibleOrders
     .filter((o) => isTerminal(o.status))
     .sort((a, b) => (b.completedAt ?? b.cancelledAt ?? 0) - (a.completedAt ?? a.cancelledAt ?? 0))
     .slice(0, 8);
 
   // Courier money: cash to collect on the way + cash collected today (works offline from local data).
   const dayStart = startOfLocalDay(new Date(Date.now() + state.serverOffset), restaurant.timezone);
-  const mine = state.orders.filter((o) => o.assignedToUserId === userId);
+  const mine = visibleOrders.filter((o) => o.assignedToUserId === userId);
   const onTheWay = mine.filter((o) => o.status === 'OUT_FOR_DELIVERY' || o.status === 'ARRIVED_AT_GATE');
-  const toCollect = onTheWay.filter((o) => o.paymentMethod === 'CASH' && o.paymentStatus !== 'PAYMENT_VERIFIED').reduce((s, o) => s + o.total, 0);
+  const toCollect = onTheWay.filter((o) => o.paymentMethod === 'CASH' && !o.cashReceivedAtCounter && o.paymentStatus !== 'PAYMENT_VERIFIED').reduce((s, o) => s + o.total, 0);
   const deliveredToday = mine.filter((o) => o.status === 'COMPLETED' && (o.completedAt ?? 0) >= dayStart.getTime());
-  const cashCollected = deliveredToday.filter((o) => o.paymentMethod === 'CASH').reduce((s, o) => s + o.total, 0);
+  const cashCollected = deliveredToday.filter((o) => o.paymentMethod === 'CASH' && !o.cashReceivedAtCounter).reduce((s, o) => s + o.total, 0);
   const showCourierStrip = perms.has('orders.delivery') && (deliveryOnly || mine.length > 0);
 
   const columnOrders = (statuses: OrderStatus[]) =>
@@ -271,16 +273,16 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
                   {t(c.title, c.titleEn)}
                   <span className="badge bg-white text-gray-800">{shown.length}</span>
                 </h2>
-                {c.key === 'ready' && perms.has('orders.delivery') && shown.length > 1 && (
+                {c.key === 'ready' && perms.has('orders.delivery') && shown.filter((o) => o.fulfillmentType !== 'PICKUP').length > 1 && (
                   <div className="px-2 pb-2">
                     <button
                       className="btn btn-primary w-full"
                       onClick={async () => {
                         // Everything goes to the same pickup run; each order is still its own synced action.
-                        for (const o of shown) await act(o, 'OUT_FOR_DELIVERY');
+                        for (const o of shown.filter((order) => order.fulfillmentType !== 'PICKUP')) await act(o, 'OUT_FOR_DELIVERY');
                       }}
                     >
-                      🛵 {t(`استلام كل الجاهز (${shown.length})`, `Collect all ready orders (${shown.length})`)}
+                      🛵 {t(`استلام جاهز التوصيل (${shown.filter((o) => o.fulfillmentType !== 'PICKUP').length})`, `Collect ready deliveries (${shown.filter((o) => o.fulfillmentType !== 'PICKUP').length})`)}
                     </button>
                   </div>
                 )}
@@ -493,8 +495,9 @@ function OrderCard({
 }) {
   const { locale, t } = useLanguage();
   const copy = labels(locale);
-  const primary = primaryActionFor(o.status);
-  const canPrimary = !!primary && perms.has(TRANSITIONS[primary].permission);
+  const pickup = o.fulfillmentType === 'PICKUP';
+  const primary = primaryActionFor(o.status, o.fulfillmentType);
+  const canPrimary = !!primary && actorMayPerform('USER', primary, o.status, (p) => perms.has(p) || perms.has('*'), o.fulfillmentType);
   const kitchenPhase = o.status === 'CONFIRMED' || o.status === 'PREPARING';
   const readyIn = o.estimatedReadyAt ? o.estimatedReadyAt - now : null;
   const arriveIn = o.estimatedArrivalAt ? o.estimatedArrivalAt - now : null;
@@ -513,6 +516,7 @@ function OrderCard({
         </div>
         <div className="flex flex-col items-end gap-1">
           {highlighted && <span className="badge bg-amber-400 text-black">{t('جديد!', 'New!')}</span>}
+          {pickup && <span className="badge bg-green-100 text-green-900">{t('استلام من المحل', 'Restaurant pickup')}</span>}
           <span className={`badge ${PAYMENT_STATUS_TONE[o.paymentStatus]}`}>
             {copy.paymentMethod[o.paymentMethod]} • {copy.paymentStatus[o.paymentStatus]}
           </span>
@@ -521,7 +525,7 @@ function OrderCard({
       </div>
 
       <div className="mt-2 flex items-center justify-between">
-        <span className="text-lg font-bold">{o.customerName}</span>
+        <span className="text-lg font-bold">{customerLabel(o.customerName, locale)}</span>
         {o.customerPhone && (
           <a href={`tel:${o.customerPhone}`} className="text-sm text-blue-700" dir="ltr" onClick={(e) => e.stopPropagation()}>{o.customerPhone}</a>
         )}
@@ -542,7 +546,7 @@ function OrderCard({
       <div className="mt-2 grid grid-cols-2 gap-1 text-sm">
         <span className="text-gray-500">{t('الإجمالي', 'Total')}</span>
         <span className="text-end font-bold">{formatMoney(o.total, locale)}</span>
-        <span className="text-gray-500">{t('الاستلام', 'Pickup point')}</span>
+        <span className="text-gray-500">{pickup ? t('استلام من المحل', 'Restaurant pickup') : t('الاستلام', 'Pickup point')}</span>
         <span className="truncate text-end">{localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}</span>
         {o.paymentReference && (
           <>
@@ -577,7 +581,7 @@ function OrderCard({
         </div>
       )}
       {o.status === 'CONFIRMED' && !o.estimatedReadyAt && <div className="mt-2 text-center text-xs text-gray-500">{t('الوقت المتوقع هيتحسب بعد المزامنة', 'The estimated time will appear after syncing')}</div>}
-      {(o.status === 'READY' || o.status === 'OUT_FOR_DELIVERY') && arriveIn !== null && (
+      {!pickup && (o.status === 'READY' || o.status === 'OUT_FOR_DELIVERY') && arriveIn !== null && (
         <div className="mt-2 text-center text-sm text-gray-600" dir="ltr">{t('وصول متوقع خلال', 'Customer arrival in')}: {arriveIn >= 0 ? mmss(arriveIn) : `+${mmss(arriveIn)}`}</div>
       )}
 
@@ -589,7 +593,7 @@ function OrderCard({
             onAction(o, primary);
           }}
         >
-          {copy.action[primary]}
+          {pickup && primary === 'COMPLETE' ? t('تم التسليم للعميل', 'Collected by customer') : copy.action[primary]}
           {primary === 'VERIFY_PAYMENT' ? ` (${formatMoney(o.total, locale)})` : ''}
         </button>
       )}

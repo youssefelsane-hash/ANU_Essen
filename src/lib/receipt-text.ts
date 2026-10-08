@@ -1,6 +1,7 @@
 import { formatDateTime, formatMoney } from './domain/misc';
 import { labels, localizedName, text, type Locale } from './i18n';
 import type { OrderSnapshot } from './types';
+import { customerLabel } from './customer-label';
 
 /**
  * Plain-text receipt (fixed width) for raw/ESC-POS printing integrations (QZ Tray, PrintNode,
@@ -20,7 +21,7 @@ export function receiptText(order: OrderSnapshot, restaurantName: string, timeZo
     center(`${t('طلب', 'Order')} #${order.orderNumber}`),
     center(formatDateTime(order.createdAt, timeZone, locale)),
     line,
-    `${t('العميل', 'Customer')}: ${order.customerName}`,
+    `${t('العميل', 'Customer')}: ${customerLabel(order.customerName, locale)}`,
     ...(order.customerPhone ? [`${t('الهاتف', 'Phone')}: ${order.customerPhone}`] : []),
     line,
   ];
@@ -34,7 +35,7 @@ export function receiptText(order: OrderSnapshot, restaurantName: string, timeZo
   if (order.deliveryFee) out.push(row(t('التوصيل', 'Delivery'), formatMoney(order.deliveryFee, locale)));
   out.push(row(t('الإجمالي', 'TOTAL'), formatMoney(order.total, locale)), line);
   const paid = order.paymentStatus === 'PAYMENT_VERIFIED' ? t('مدفوع', 'PAID') : order.paymentMethod === 'CASH' ? t('تحصيل كاش', 'COLLECT CASH') : copy.paymentStatus[order.paymentStatus];
-  out.push(`${t('الدفع', 'Payment')}: ${copy.paymentMethod[order.paymentMethod]} ${paid}`, `${t('الاستلام', 'Pickup point')}: ${localizedName(locale, order.deliveryPointName, order.deliveryPointNameEn)}`);
+  out.push(`${t('الدفع', 'Payment')}: ${copy.paymentMethod[order.paymentMethod]} ${paid}`, `${order.fulfillmentType === 'PICKUP' ? t('استلام من المحل', 'Restaurant pickup') : t('الاستلام', 'Pickup point')}: ${localizedName(locale, order.deliveryPointName, order.deliveryPointNameEn)}`);
   if (order.customerNote) out.push(`${t('ملاحظة', 'Note')}: ${order.customerNote}`);
   return out.join('\n');
 }

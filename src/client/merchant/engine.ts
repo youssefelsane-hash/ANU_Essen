@@ -1,5 +1,5 @@
 import { uuid } from '@/client/ids';
-import { isTerminal, nextStatus, paymentStatusAfter, primaryActionFor, STATUS_TIMESTAMP_FIELD, TRANSITIONS, type OrderAction } from '@/lib/domain/order-machine';
+import { actorMayPerform, isTerminal, nextStatus, paymentStatusAfter, primaryActionFor, STATUS_TIMESTAMP_FIELD, type OrderAction } from '@/lib/domain/order-machine';
 import type { ActionResult, OrderSnapshot, StoreLive, SyncResponse } from '@/lib/types';
 import { errorMessage, text, type Locale } from '@/lib/i18n';
 import { openLocalDb, readMeta, type LocalDb, type OutboxEntry } from './local-db';
@@ -62,7 +62,7 @@ async function request<T>(url: string, init: RequestInit = {}, timeoutMs = 12_00
 export function applyPending(order: OrderSnapshot, pending: OutboxEntry[], actorUserId?: string): OrderSnapshot {
   let view = order;
   for (const p of pending) {
-    const next = nextStatus(view.status, p.action);
+    const next = nextStatus(view.status, p.action, view.fulfillmentType);
     if (!next) continue;
     const field = STATUS_TIMESTAMP_FIELD[next];
     view = { ...view, status: next, ...(field ? { [field]: p.occurredAt } : {}) };
@@ -180,8 +180,8 @@ export class MerchantEngine {
   async dispatch(orderId: string, action: OrderAction, payload?: { reason?: string }): Promise<boolean> {
     if (this.stopped || !this.state.ready || this.dispatching.has(orderId)) return false;
     const current = this.state.orders.find((o) => o.id === orderId);
-    if (!current || !nextStatus(current.status, action)) return false;
-    if (!this.permissions.has(TRANSITIONS[action].permission) && !this.permissions.has('*')) return false;
+    if (!current || !nextStatus(current.status, action, current.fulfillmentType)) return false;
+    if (!actorMayPerform('USER', action, current.status, (p) => this.permissions.has(p) || this.permissions.has('*'), current.fulfillmentType)) return false;
     if (
       (action === 'MARK_ARRIVED' || action === 'COMPLETE') &&
       !this.permissions.has('orders.view') && !this.permissions.has('*') &&
@@ -342,8 +342,8 @@ export class MerchantEngine {
 
   private isActionable(o: OrderSnapshot): boolean {
     if (o.status === 'AWAITING_PAYMENT') return false; // nothing to do until the customer pays
-    const action = primaryActionFor(o.status);
-    return !!action && (this.permissions.has(TRANSITIONS[action].permission) || this.permissions.has('*'));
+    const action = primaryActionFor(o.status, o.fulfillmentType);
+    return !!action && actorMayPerform('USER', action, o.status, (p) => this.permissions.has(p) || this.permissions.has('*'), o.fulfillmentType);
   }
 
   private recompute() {

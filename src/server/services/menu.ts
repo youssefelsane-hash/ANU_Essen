@@ -185,6 +185,6 @@ export async function loadPublicMenu(d: Db, slug: string, now = new Date()): Pro
     })),
     banners: bannerRows.map((b) => ({ id: b.id, titleAr: b.titleAr, titleEn: b.titleEn, subtitleAr: b.subtitleAr, subtitleEn: b.subtitleEn, imageUrl: b.imageUrl, bgColor: b.bgColor, textColor: b.textColor })),
     paymentMethods: methodRows.map((m) => ({ method: m.method })),
-    deliveryPoints: pointRows.map((p) => ({ id: p.id, nameAr: p.nameAr, nameEn: p.nameEn, isDefault: p.isDefault, deliveryFee: p.deliveryFee })),
+    deliveryPoints: pointRows.map((p) => ({ id: p.id, fulfillmentType: p.fulfillmentType, nameAr: p.nameAr, nameEn: p.nameEn, isDefault: p.isDefault, deliveryFee: p.fulfillmentType === 'PICKUP' ? 0 : p.deliveryFee })),
   };
 }

@@ -94,6 +94,25 @@ describe('merchant outbox under real interaction timing', () => {
     expect(courier.getState().orders[0].status).toBe('OUT_FOR_DELIVERY');
   });
 
+  it('saves a cashier pickup handover offline without inventing courier stages', async () => {
+    disk.orders = [order({ status: 'READY', fulfillmentType: 'PICKUP' })];
+    const cashier = await start(['orders.accept']);
+    expect(await cashier.dispatch('order-1', 'OUT_FOR_DELIVERY')).toBe(false);
+    expect(await cashier.dispatch('order-1', 'COMPLETE')).toBe(true);
+    expect(cashier.getState().orders[0].status).toBe('COMPLETED');
+    expect(cashier.getState().orders[0].paymentStatus).toBe('PAYMENT_VERIFIED');
+    expect(cashier.getState().orders[0].outForDeliveryAt).toBeNull();
+    expect((disk.outbox as OutboxEntry[]).map((entry) => entry.action)).toEqual(['COMPLETE']);
+  });
+
+  it('rejects a courier pickup handover from an old cached snapshot', async () => {
+    disk.orders = [order({ status: 'READY', fulfillmentType: 'PICKUP' })];
+    const courier = await start(['orders.delivery']);
+    expect(await courier.dispatch('order-1', 'COMPLETE')).toBe(false);
+    expect(await courier.dispatch('order-1', 'OUT_FOR_DELIVERY')).toBe(false);
+    expect(disk.outbox).toEqual([]);
+  });
+
   it('keeps the original status after a disk failure and permits a successful retry', async () => {
     const engine = await start();
     disk.write = async () => { throw new Error('storage full'); };

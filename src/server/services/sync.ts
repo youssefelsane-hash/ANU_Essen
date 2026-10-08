@@ -87,7 +87,7 @@ export async function merchantSync(params: {
     // Delivery staff: orders ready for pickup + the deliveries they took.
     visible = snapshots.filter(
       (o) =>
-        o.status === 'READY' ||
+        (o.status === 'READY' && o.fulfillmentType !== 'PICKUP') ||
         (o.assignedToUserId === auth.user.id && ['OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE', 'COMPLETED'].includes(o.status)),
     );
     for (const o of snapshots) if (!visible.includes(o)) removed.push(o.id);

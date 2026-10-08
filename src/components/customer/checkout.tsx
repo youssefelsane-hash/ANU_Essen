@@ -39,6 +39,8 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
   const [method, setMethod] = useState<PaymentMethod | null>(menu.paymentMethods[0]?.method ?? null);
   const defaultPoint = menu.deliveryPoints.find((p) => p.isDefault) ?? menu.deliveryPoints[0];
   const [pointId, setPointId] = useState<string | undefined>(defaultPoint?.id);
+  const pickup = menu.deliveryPoints.find((p) => p.id === pointId)?.fulfillmentType === 'PICKUP';
+  const requirePhone = menu.restaurant.requirePhone && !pickup;
   const [quoteState, setQuoteState] = useState<QuoteState | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -132,7 +134,7 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
     };
   }, [items, promoCode, pointId, slug, requestKey]);
 
-  const phoneValid = !phone ? !menu.restaurant.requirePhone : !!normalizeEgyptianPhone(phone);
+  const phoneValid = !phone ? !requirePhone : !!normalizeEgyptianPhone(phone);
   const allAvailable = lines.every((line) => estimateLine(menu, line, locale).available);
   const canSubmit = accepting && online && !!quote && !quoteError && quote.minOrderShortfall === 0 && allAvailable &&
     name.trim().length >= 2 && phoneValid && !!method && !submitting && (menu.deliveryPoints.length === 0 || !!pointId);
@@ -251,7 +253,7 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
 
           <section className="checkout-card">
             <div className="checkout-card-heading"><span className="checkout-section-number">02</span><div><h2>{t("مين هيستلم الطلب؟", "Who is collecting?")}</h2><p>{t("بيانات بسيطة عشان طلبك يوصل بسهولة.", "A few details to make pickup easy.")}</p></div></div>
-            {profileSaved && !editingProfile ? (
+            {profileSaved && !editingProfile && phoneValid ? (
               <div className="saved-profile">
                 <span className="saved-profile-icon"><UserRound size={20} /></span>
                 <span><strong>{name}</strong>{phone && <span dir="ltr">{phone}</span>}<small>{t("بياناتك محفوظة على الموبايل ده", "Your details are saved on this device")}</small></span>
@@ -260,7 +262,7 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
             ) : (
             <div className="customer-form-grid">
                 <div className="customer-form-field"><label htmlFor="customer-name">{t("اسمك", "Your name")}</label><input id="customer-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required disabled={submitting} minLength={2} maxLength={60} placeholder={t("الاسم اللي هنناديك بيه", "The name we'll call at pickup")} /></div>
-                <div className="customer-form-field"><label htmlFor="customer-phone">{t("رقم الموبايل ", "Mobile number ")}{!menu.restaurant.requirePhone && <span>{t("(اختياري)", "(optional)")}</span>}</label><input id="customer-phone" type="tel" dir="ltr" inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} autoComplete="tel" placeholder="01xxxxxxxxx" maxLength={20} required={menu.restaurant.requirePhone} disabled={submitting} aria-invalid={!!phone && !phoneValid} aria-describedby="phone-help" /><small id="phone-help" className={phone && !phoneValid ? 'field-error' : ''}>{phone && !phoneValid ? t("راجع الرقم. محتاجين رقم موبايل مصري صحيح.", "Check your number. Please use a valid Egyptian mobile number.") : t("هنتصل بيك لو احتجنا مساعدة عند الاستلام.", "We'll call only if we need help finding you.")}</small></div>
+                <div className="customer-form-field"><label htmlFor="customer-phone">{t("رقم الموبايل ", "Mobile number ")}{!requirePhone && <span>{t("(اختياري)", "(optional)")}</span>}</label><input id="customer-phone" type="tel" dir="ltr" inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} autoComplete="tel" placeholder="01xxxxxxxxx" maxLength={20} required={requirePhone} disabled={submitting} aria-invalid={!!phone && !phoneValid} aria-describedby="phone-help" /><small id="phone-help" className={phone && !phoneValid ? 'field-error' : ''}>{phone && !phoneValid ? t("راجع الرقم. محتاجين رقم موبايل مصري صحيح.", "Check your number. Please use a valid Egyptian mobile number.") : t("هنتصل بيك لو احتجنا مساعدة عند الاستلام.", "We'll call only if we need help finding you.")}</small></div>
               </div>
             )}
             <button type="button" className="customer-note-toggle" disabled={submitting} onClick={() => setShowNote(!showNote)} aria-expanded={showNote} aria-controls="customer-note-field"><Plus size={13} />{showNote ? t("إخفاء ملاحظة الطلب", "Hide order note") : t("عندك ملاحظة للمطبخ؟", "A note for the kitchen?")}</button>
@@ -268,9 +270,9 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
           </section>
 
           <section className="checkout-card">
-            <div className="checkout-card-heading"><span className="checkout-section-number">03</span><div><h2>{t("هنقابلك فين؟", "Where shall we meet?")}</h2><p>{t("اختار نقطة الاستلام المناسبة ليك.", "Choose a convenient pickup point.")}</p></div></div>
+            <div className="checkout-card-heading"><span className="checkout-section-number">03</span><div><h2>{t("هتستلم فين؟", "Where will you collect?")}</h2><p>{t("استلم من المحل أو اختار نقطة الاستلام المناسبة ليك.", "Collect from the restaurant or choose a convenient pickup point.")}</p></div></div>
             <div className="checkout-choice-list">
-              {menu.deliveryPoints.length ? menu.deliveryPoints.map((point) => <label key={point.id} className={'customer-choice ' + (pointId === point.id ? 'is-selected' : '')}><input type="radio" name="delivery-point" checked={pointId === point.id} disabled={submitting} onChange={() => setPointId(point.id)} /><MapPin className="delivery-choice-icon" size={19} /><span>{localizedName(locale, point.nameAr, point.nameEn)}{point.isDefault && <small>{t("نقطة الاستلام الرئيسية", "Main pickup point")}</small>}</span><strong>{point.deliveryFee > 0 ? formatMoney(point.deliveryFee, locale) : t("بدون رسوم", "No fee")}</strong></label>) :
+              {menu.deliveryPoints.length ? menu.deliveryPoints.map((point) => <label key={point.id} className={'customer-choice ' + (pointId === point.id ? 'is-selected' : '')}><input type="radio" name="delivery-point" checked={pointId === point.id} disabled={submitting} onChange={() => setPointId(point.id)} /><MapPin className="delivery-choice-icon" size={19} /><span>{localizedName(locale, point.nameAr, point.nameEn)}<small>{point.fulfillmentType === 'PICKUP' ? t("استلام من المحل · بدون توصيل", "Collect at the restaurant · no delivery") : point.isDefault ? t("التوصيل الافتراضي", "Default delivery point") : t("توصيل لنقطة الاستلام", "Delivery to collection point")}</small></span><strong>{point.deliveryFee > 0 ? formatMoney(point.deliveryFee, locale) : t("بدون رسوم", "No fee")}</strong></label>) :
                 <p className="checkout-line-note">{t("نقطة الاستلام بتتحدد مع المطعم.", "Arrange pickup with the restaurant.")}</p>}
             </div>
           </section>
@@ -279,7 +281,7 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
             <div className="checkout-card-heading"><span className="checkout-section-number">04</span><div><h2>{t("تفضّل تدفع إزاي؟", "How would you like to pay?")}</h2><p>{t("اختار الطريقة الأنسب ليك.", "Choose the method that suits you.")}</p></div></div>
             <div className="checkout-choice-list">
               {menu.paymentMethods.length === 0 && <p className="checkout-line-note">{t("لا توجد طريقة دفع متاحة حاليًا.", "No payment method is currently available.")}</p>}
-              {menu.paymentMethods.map(({ method: payment }) => <label key={payment} className={'customer-choice ' + (method === payment ? 'is-selected' : '')}><input type="radio" name="payment-method" checked={method === payment} disabled={submitting} onChange={() => setMethod(payment)} /><span className="checkout-payment-icon">{payment === 'INSTAPAY' ? <CreditCard size={18} /> : <Banknote size={18} />}</span><span>{payment === 'INSTAPAY' ? t('إنستاباي', 'InstaPay') : t("كاش عند الاستلام", "Cash on pickup")}<small>{payment === 'INSTAPAY' ? t("بيانات التحويل هتظهر بعد التأكيد. الدفع بيتراجع من المطعم.", "Transfer details appear after confirmation. The restaurant checks your payment.") : t("ادفع لما طلبك يوصل لنقطة الاستلام.", "Pay when your order reaches the pickup point.")}</small></span></label>)}
+              {menu.paymentMethods.map(({ method: payment }) => <label key={payment} className={'customer-choice ' + (method === payment ? 'is-selected' : '')}><input type="radio" name="payment-method" checked={method === payment} disabled={submitting} onChange={() => setMethod(payment)} /><span className="checkout-payment-icon">{payment === 'INSTAPAY' ? <CreditCard size={18} /> : <Banknote size={18} />}</span><span>{payment === 'INSTAPAY' ? t('إنستاباي', 'InstaPay') : t("كاش عند الاستلام", "Cash on pickup")}<small>{payment === 'INSTAPAY' ? t("بيانات التحويل هتظهر بعد التأكيد. الدفع بيتراجع من المطعم.", "Transfer details appear after confirmation. The restaurant checks your payment.") : pickup ? t("ادفع عند استلام طلبك من المحل.", "Pay when you collect your order at the restaurant.") : t("ادفع لما طلبك يوصل لنقطة الاستلام.", "Pay when your order reaches the pickup point.")}</small></span></label>)}
             </div>
           </section>
           {!accepting && <div className="customer-alert" role="status">{menu.store.reason === 'INACTIVE' ? t("الطلب أونلاين من المطعم ده متوقف مؤقتًا.", "Online ordering is temporarily unavailable.") : storeStatus === 'PAUSED' ? t("الطلبات متوقفة مؤقتًا بسبب ضغط المطبخ. سلتك محفوظة.", "Ordering is paused while the kitchen is busy. Your basket is saved.") : t("المطعم مغلق حاليًا. اختياراتك محفوظة في السلة.", "The restaurant is closed. Your basket is saved.")}</div>}
@@ -287,12 +289,12 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
           {error && <div className="customer-alert" role="alert">{customerMessage(error, locale)}</div>}
         </div>
 
-        <aside className="checkout-summary" aria-label={t("ملخص السعر ووقت الوصول", "Price and arrival summary")}>
+        <aside className="checkout-summary" aria-label={pickup ? t("ملخص السعر ووقت التجهيز", "Price and preparation summary") : t("ملخص السعر ووقت الوصول", "Price and arrival summary")}>
           <section className="checkout-card">
             <h2 className="checkout-summary-heading"><ShoppingBag size={20} />{t("ملخص طلبك", "Your order summary")}</h2>
             {quote ? <>
-              <div className="checkout-eta"><Clock3 size={25} strokeWidth={1.5} /><div><span>{t("وقت الوصول المتوقع", "Estimated arrival")}</span><strong>{t("حوالي ", "About ")}{quote.etaMinutes}{t(" دقيقة", " minutes")}</strong><small>{t("تقدير بيتحدث حسب ضغط المطبخ؛ التوقيت يتأكد بعد قبول الطلب.", "This estimate changes with kitchen demand. Timing is confirmed when your order is accepted.")}</small></div></div>
-              <div className="checkout-money-rows"><MoneyRow label={t("قيمة الأصناف", "Items subtotal")} value={formatMoney(quote.subtotal, locale)} />{quote.discount > 0 && <MoneyRow label={t("خصم طلبك", "Your discount")} value={'− ' + formatMoney(quote.discount, locale)} discount />}<MoneyRow label={t("رسوم التوصيل", "Delivery fee")} value={quote.deliveryFee > 0 ? formatMoney(quote.deliveryFee, locale) : t("مجانًا", "Free")} /></div>
+              <div className="checkout-eta"><Clock3 size={25} strokeWidth={1.5} /><div><span>{pickup ? t("جاهز للاستلام خلال", "Ready for collection in") : t("وقت الوصول المتوقع", "Estimated arrival")}</span><strong>{t("حوالي ", "About ")}{quote.etaMinutes}{t(" دقيقة", " minutes")}</strong><small>{t("تقدير بيتحدث حسب ضغط المطبخ؛ التوقيت يتأكد بعد قبول الطلب.", "This estimate changes with kitchen demand. Timing is confirmed when your order is accepted.")}</small></div></div>
+              <div className="checkout-money-rows"><MoneyRow label={t("قيمة الأصناف", "Items subtotal")} value={formatMoney(quote.subtotal, locale)} />{quote.discount > 0 && <MoneyRow label={t("خصم طلبك", "Your discount")} value={'− ' + formatMoney(quote.discount, locale)} discount />}{!pickup && <MoneyRow label={t("رسوم التوصيل", "Delivery fee")} value={quote.deliveryFee > 0 ? formatMoney(quote.deliveryFee, locale) : t("مجانًا", "Free")} />}</div>
               <div className="checkout-grand-total"><span>{t("الإجمالي", "Total")}</span><strong>{formatMoney(quote.total, locale)}</strong></div>
               {quote.minOrderShortfall > 0 && <p className="checkout-submit-hint">{t("الحد الأدنى ", "Minimum order ")}{formatMoney(quote.minOrderAmount, locale)}{t(". ضيف ", ". Add ")}{formatMoney(quote.minOrderShortfall, locale)}{t(" عشان تكمل.", " to continue.")}</p>}
             </> : quoteError ? <div className="quote-error" role="alert"><p>{customerMessage(quoteError, locale)}</p><button type="button" className="customer-secondary-button" disabled={submitting} onClick={() => setRefreshVersion((version) => version + 1)}>{t("تحديث حساب الطلب", "Refresh order total")}</button></div> :

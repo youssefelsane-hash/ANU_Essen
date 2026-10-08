@@ -63,7 +63,7 @@ function duplicateResult(order: typeof orders.$inferSelect, event: typeof orderE
   }
   if (event.actorType !== input.actor.type || event.actorUserId !== (input.actor.userId ?? null) ||
       !actorMayPerform(input.actor.type, input.action, event.fromStatus ?? order.status, (p) =>
-        input.actor.auth ? hasPermission(input.actor.auth, p, order.restaurantId) : false)) {
+        input.actor.auth ? hasPermission(input.actor.auth, p, order.restaurantId) : false, order.fulfillmentType)) {
     throw new AppError('FORBIDDEN', 'Not allowed to replay this action');
   }
   return { result: 'duplicate', orderId: order.id, restaurantId: order.restaurantId, status: order.status };
@@ -93,12 +93,12 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
         throw new AppError('INVALID_TRANSITION', 'Order changed since the background job inspected it');
       }
 
-      const next = nextStatus(order.status, input.action);
+      const next = nextStatus(order.status, input.action, order.fulfillmentType);
       if (!next) {
         throw new AppError('INVALID_TRANSITION', `Cannot ${input.action} an order that is ${order.status}`, { current: order.status, action: input.action });
       }
       const permitted = actorMayPerform(input.actor.type, input.action, order.status, (p) =>
-        input.actor.auth ? hasPermission(input.actor.auth, p, order.restaurantId) : false,
+        input.actor.auth ? hasPermission(input.actor.auth, p, order.restaurantId) : false, order.fulfillmentType,
       );
       if (!permitted) throw new AppError('FORBIDDEN', 'Not allowed to perform this action');
 
@@ -146,6 +146,7 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
       let etaChanged = false;
       const deliveryMinutes = async () => {
         const cfg = await getQueueConfig(tx, order.restaurantId);
+        if (order.fulfillmentType === 'PICKUP') return { cfg, extra: 0, minutes: 0 };
         let extra = 0;
         if (order.deliveryPointId) {
           const [dp] = await tx.select({ extra: deliveryPoints.extraMinutes }).from(deliveryPoints).where(eq(deliveryPoints.id, order.deliveryPointId));
@@ -157,7 +158,7 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
       if (next === 'CONFIRMED') {
         const { cfg, extra } = await deliveryMinutes();
         const { load } = await getActiveLoad(tx, order.restaurantId, order.id);
-        const eta = computeEta({ confirmedAt: at, activeLoad: load, orderLoad: order.loadUnits, config: cfg, extraDeliveryMinutes: extra });
+        const eta = computeEta({ confirmedAt: at, activeLoad: load, orderLoad: order.loadUnits, config: cfg, extraDeliveryMinutes: extra, fulfillmentType: order.fulfillmentType });
         patch.estimatedPrepStartAt = eta.prepStartAt;
         patch.estimatedReadyAt = eta.readyAt;
         patch.estimatedArrivalAt = eta.arrivalAt;
@@ -195,7 +196,7 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
         paymentPatch.reference = input.payload?.reference?.trim() || null;
         paymentPatch.rejectedReason = null;
         if (paymentPatch.reference) eventData.reference = paymentPatch.reference;
-      } else if (input.action === 'VERIFY_PAYMENT') {
+      } else if (input.action === 'VERIFY_PAYMENT' || (input.action === 'COMPLETE' && order.paymentMethod === 'CASH' && newPaymentStatus === 'PAYMENT_VERIFIED')) {
         paymentPatch.verifiedAt = at;
         paymentPatch.verifiedByUserId = input.actor.userId ?? null;
       } else if (input.action === 'REJECT_PAYMENT') {

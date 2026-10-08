@@ -12,7 +12,14 @@ import { formatMoney, formatTime } from '@/lib/domain/misc';
 import { isTerminal, type OrderStatus } from '@/lib/domain/order-machine';
 import type { TrackingView } from '@/lib/types';
 
-function stepsFor(t: (ar: string, en: string) => string): { label: string; reached: (s: OrderStatus) => boolean; active: (s: OrderStatus) => boolean }[] { return [
+function stepsFor(t: (ar: string, en: string) => string, pickup: boolean): { label: string; reached: (s: OrderStatus) => boolean; active: (s: OrderStatus) => boolean }[] {
+  if (pickup) return [
+    { label: t('الطلب اتأكد', 'Order confirmed'), reached: (s) => ['CONFIRMED', 'PREPARING', 'READY', 'COMPLETED'].includes(s), active: (s) => s === 'CONFIRMED' },
+    { label: t('جاري التحضير', 'Preparing your meal'), reached: (s) => ['PREPARING', 'READY', 'COMPLETED'].includes(s), active: (s) => s === 'PREPARING' },
+    { label: t('جاهز للاستلام من المحل', 'Ready to collect at the restaurant'), reached: (s) => ['READY', 'COMPLETED'].includes(s), active: (s) => s === 'READY' },
+    { label: t('تم الاستلام', 'Collected'), reached: (s) => s === 'COMPLETED', active: (s) => s === 'COMPLETED' },
+  ];
+  return [
   { label: t("الطلب اتأكد", "Order confirmed"), reached: (s) => ['CONFIRMED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE', 'COMPLETED'].includes(s), active: (s) => s === 'CONFIRMED' },
   { label: t("جاري التحضير", "Preparing your meal"), reached: (s) => ['PREPARING', 'READY', 'OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE', 'COMPLETED'].includes(s), active: (s) => s === 'PREPARING' || s === 'READY' },
   { label: t("خرج للتوصيل", "Out for delivery"), reached: (s) => ['OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE', 'COMPLETED'].includes(s), active: (s) => s === 'OUT_FOR_DELIVERY' },
@@ -42,7 +49,8 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
   const [stale, setStale] = useState(false);
   const now = useNow(offset, initial.serverTime);
   const o = view.order;
-  const steps = stepsFor(t);
+  const pickup = o.fulfillmentType === 'PICKUP';
+  const steps = stepsFor(t, pickup);
   const done = isTerminal(o.status);
   const inFlight = useRef(false);
 
@@ -92,13 +100,14 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
     };
   }, [done, refresh, initial.serverTime]);
 
-  const inQueue = ['CONFIRMED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'].includes(o.status);
-  const remaining = o.estimatedArrivalAt ? o.estimatedArrivalAt - now : null;
+  const inQueue = (pickup ? ['CONFIRMED', 'PREPARING'] : ['CONFIRMED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY']).includes(o.status);
+  const expectedAt = pickup ? o.estimatedReadyAt : o.estimatedArrivalAt;
+  const remaining = expectedAt ? expectedAt - now : null;
 
   const provisional = ['CREATED', 'AWAITING_PAYMENT', 'PAYMENT_REVIEW'].includes(o.status);
-  const stepIcons = [CheckCheck, ChefHat, Bike, MapPin];
+  const stepIcons = pickup ? [CheckCheck, ChefHat, ShoppingBag, UtensilsCrossed] : [CheckCheck, ChefHat, Bike, MapPin];
   const activeStep = o.status === 'COMPLETED' ? 4 : Math.max(0, steps.findIndex((step) => step.active(o.status)));
-  const stateLabel = o.status === 'CREATED' ? t("في انتظار تأكيد المطعم", "Waiting for the restaurant") : o.status === 'PAYMENT_REVIEW' ? t("بنراجع التحويل", "Checking your transfer") : o.status === 'AWAITING_PAYMENT' ? t("في انتظار الدفع", "Waiting for payment") : o.status === 'CONFIRMED' ? t("المطعم أكد طلبك", "Your order is confirmed") : o.status === 'PREPARING' ? t("أكلك بيتحضّر", "Your meal is being prepared") : o.status === 'READY' ? t("طلبك جاهز للتوصيل", "Ready for delivery") : o.status === 'OUT_FOR_DELIVERY' ? t("طلبك في الطريق", "Your order is on its way") : o.status === 'ARRIVED_AT_GATE' ? t("طلبك وصل", "Your order has arrived") : o.status === 'COMPLETED' ? t("بالهنا والشفا", "Enjoy your meal") : t("الطلب اتلغى", "Order cancelled");
+  const stateLabel = o.status === 'CREATED' ? t("في انتظار تأكيد المطعم", "Waiting for the restaurant") : o.status === 'PAYMENT_REVIEW' ? t("بنراجع التحويل", "Checking your transfer") : o.status === 'AWAITING_PAYMENT' ? t("في انتظار الدفع", "Waiting for payment") : o.status === 'CONFIRMED' ? t("المطعم أكد طلبك", "Your order is confirmed") : o.status === 'PREPARING' ? t("أكلك بيتحضّر", "Your meal is being prepared") : o.status === 'READY' ? pickup ? t("طلبك جاهز في المحل", "Your order is ready at the restaurant") : t("طلبك جاهز للتوصيل", "Ready for delivery") : o.status === 'OUT_FOR_DELIVERY' ? t("طلبك في الطريق", "Your order is on its way") : o.status === 'ARRIVED_AT_GATE' ? t("طلبك وصل", "Your order has arrived") : o.status === 'COMPLETED' ? t("بالهنا والشفا", "Enjoy your meal") : t("الطلب اتلغى", "Order cancelled");
 
   return (
     <main className="tracking-page">
@@ -116,11 +125,11 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
         <p>{t("احتفظ بالرقم لاستلام طلبك بسهولة.", "Keep this number handy for pickup.")}</p>
       </section>
 
-      {(inQueue || (provisional && o.estimatedArrivalAt)) && <section className={`tracking-eta ${provisional ? 'is-provisional' : ''}`}>
-        <div className="tracking-eta-label"><Clock3 size={18} />{provisional ? t("الوقت المتوقع بعد التأكيد", "Estimated time after confirmation") : o.status === 'OUT_FOR_DELIVERY' ? t("متوقع يوصل خلال", "Expected to arrive in") : t("متوقع تستلم خلال", "Expected pickup in")}</div>
-        {provisional ? <><strong className="tracking-eta-provisional">{t("حوالي ", "About ")}{Math.max(1, Math.ceil(((o.estimatedArrivalAt ?? now) - o.createdAt) / 60000))}{t(" دقيقة", " minutes")}</strong><p>{t("بيبدأ التحضير بعد ", "Preparation starts after ")}{o.paymentMethod === 'INSTAPAY' ? t("تأكيد التحويل", "payment is verified") : t("قبول المطعم للطلب", "the restaurant accepts your order")}{t("، والوقت بيتحدّث حسب ضغط المطبخ.", ", and timing changes with kitchen demand.")}</p></> : remaining !== null && remaining > 0 ? <>
+      {(inQueue || (provisional && expectedAt)) && <section className={`tracking-eta ${provisional ? 'is-provisional' : ''}`}>
+        <div className="tracking-eta-label"><Clock3 size={18} />{provisional ? t("الوقت المتوقع بعد التأكيد", "Estimated time after confirmation") : pickup ? t("جاهز للاستلام خلال", "Ready for collection in") : o.status === 'OUT_FOR_DELIVERY' ? t("متوقع يوصل خلال", "Expected to arrive in") : t("متوقع تستلم خلال", "Expected pickup in")}</div>
+        {provisional ? <><strong className="tracking-eta-provisional">{t("حوالي ", "About ")}{Math.max(1, Math.ceil(((expectedAt ?? now) - o.createdAt) / 60000))}{t(" دقيقة", " minutes")}</strong><p>{t("بيبدأ التحضير بعد ", "Preparation starts after ")}{o.paymentMethod === 'INSTAPAY' ? t("تأكيد التحويل", "payment is verified") : t("قبول المطعم للطلب", "the restaurant accepts your order")}{t("، والوقت بيتحدّث حسب ضغط المطبخ.", ", and timing changes with kitchen demand.")}</p></> : remaining !== null && remaining > 0 ? <>
           <div className="tracking-countdown" dir="ltr" aria-label={t("الوقت المتبقي تقريبًا", "Approximate time remaining")}>{mmss(remaining)}</div>
-          <p>{t("وقت الاستلام المتوقع ", "Expected pickup time ")}<strong>{formatTime(o.estimatedArrivalAt!, view.restaurant.timezone, locale)}</strong></p>
+          <p>{t("وقت الاستلام المتوقع ", "Expected pickup time ")}<strong>{formatTime(expectedAt!, view.restaurant.timezone, locale)}</strong></p>
         </> : <><strong className="tracking-eta-provisional">{t("بننتظر تحديث المطعم", "Waiting for a restaurant update")}</strong><p>{t("الطلب اتأخر عن الوقت المتوقع. هنحدّث الحالة أول ما المطعم يحدّثها.", "Your order is taking longer than estimated. We'll show the restaurant's next update here.")}</p></>}
         {!provisional && <div className="tracking-eta-foot">{t("الوقت تقديري وبيتحدّث مع حالة طلبك", "Timing is estimated and changes with your order status")}</div>}
       </section>}
@@ -128,7 +137,8 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
       {o.status === 'AWAITING_PAYMENT' && view.instapay && <PaymentCard view={view} token={token} now={now} onSubmitted={refresh} />}
       {o.status === 'PAYMENT_REVIEW' && <section className="tracking-state-card"><div className="tracking-state-icon"><Clock3 size={23} /></div><div><h2>{t("التحويل تحت المراجعة", "Your transfer is being checked")}</h2><p>{t("المطعم بيتأكد من التحويل قبل بدء التحضير. هنحدّثك هنا أول ما يتأكد.", "The restaurant checks your transfer before preparing your order. We'll update this page when it's verified.")}</p></div></section>}
       {o.status === 'CREATED' && <section className="tracking-state-card"><div className="tracking-state-icon"><ShoppingBag size={23} /></div><div><h2>{t("طلبك وصل للمطعم", "The restaurant received your order")}</h2><p>{t("في انتظار قبول الطلب. الدفع كاش عند الاستلام.", "Waiting for the restaurant to accept. Pay cash at pickup.")}</p></div></section>}
-      {o.status === 'ARRIVED_AT_GATE' && <section className="tracking-arrived"><MapPin size={30} /><h2>{t("طلبك وصل ", "Your order has arrived at ")}{localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}</h2><p>{t("قول للدليفري رقم الطلب ", "Tell the courier your order number ")}<b dir="ltr">#{o.orderNumber}</b>{o.paymentMethod === 'CASH' ? t(' وادفع ', ' and pay ') + formatMoney(o.total, locale) : ''}.</p></section>}
+      {pickup && o.status === 'READY' && <section className="tracking-arrived"><ShoppingBag size={30} /><h2>{t("طلبك جاهز للاستلام من المحل", "Your order is ready to collect at the restaurant")}</h2><p>{t("قول للكاشير رقم الطلب ", "Tell the cashier your order number ")}<b dir="ltr">#{o.orderNumber}</b>{o.paymentMethod === 'CASH' && o.paymentStatus !== 'PAYMENT_VERIFIED' ? t(' وادفع ', ' and pay ') + formatMoney(o.total, locale) : ''}.</p><p>{localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}</p></section>}
+      {o.status === 'ARRIVED_AT_GATE' && <section className="tracking-arrived"><MapPin size={30} /><h2>{t("طلبك وصل ", "Your order has arrived at ")}{localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}</h2><p>{t("قول للدليفري رقم الطلب ", "Tell the courier your order number ")}<b dir="ltr">#{o.orderNumber}</b>{o.paymentMethod === 'CASH' && o.paymentStatus !== 'PAYMENT_VERIFIED' ? t(' وادفع ', ' and pay ') + formatMoney(o.total, locale) : ''}.</p></section>}
       {o.status === 'COMPLETED' && <section className="tracking-arrived"><UtensilsCrossed size={30} /><h2>{t("تم التسليم. بالهنا والشفا!", "Delivered. Enjoy your meal!")}</h2><p>{t("نتمنى تكون استمتعت بطلبك.", "We hope you enjoyed your order.")}</p><Link href={`/s/${view.restaurant.slug}?reorder=${encodeURIComponent(token)}`} className="btn btn-primary mt-5">{t("اطلب نفس الطلب تاني", "Order the same meal again")}</Link></section>}
       {o.status === 'CANCELLED' && <section className="tracking-state-card is-cancelled"><AlertCircle size={26} /><div><h2>{t("تم إلغاء الطلب", "Order cancelled")}</h2>{o.cancelReason && <p>{customerMessage(o.cancelReason, locale)}</p>}<Link href={`/s/${view.restaurant.slug}?reorder=${encodeURIComponent(token)}`} className="btn btn-primary mt-4">{t("اطلب نفس الطلب من جديد", "Try this order again")}</Link></div></section>}
 
@@ -136,7 +146,7 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
         {steps.map((step, i) => {
           const reached = step.reached(o.status), active = step.active(o.status), Icon = stepIcons[i];
           return <li key={step.label} className={`${reached ? 'is-reached' : ''} ${active ? 'is-active' : ''}`} aria-current={active ? 'step' : undefined}>
-            <span className="tracking-step-icon">{reached && i < activeStep ? <Check size={19} /> : <Icon size={19} />}</span><div><strong>{step.label}</strong>{active && <p>{o.status === 'READY' ? t("جاهز وفي انتظار التوصيل", "Ready and waiting for delivery") : t("المرحلة الحالية", "Current stage")}</p>}</div>
+            <span className="tracking-step-icon">{reached && i < activeStep ? <Check size={19} /> : <Icon size={19} />}</span><div><strong>{step.label}</strong>{active && <p>{o.status === 'READY' ? pickup ? t("استلم طلبك من الكاشير", "Collect your order from the cashier") : t("جاهز وفي انتظار التوصيل", "Ready and waiting for delivery") : t("المرحلة الحالية", "Current stage")}</p>}</div>
           </li>;
         })}
       </ol></section>}
@@ -144,7 +154,7 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
 
       <aside className="tracking-secondary">
       <section className="tracking-summary"><div className="tracking-summary-heading"><h2>{t("تفاصيل طلبك", "Your order details")}</h2><ShoppingBag size={19} /></div>
-        <div className="tracking-delivery"><MapPin size={19} /><div><span>{t("نقطة الاستلام", "Pickup point")}</span><strong>{localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}</strong></div></div>
+        <div className="tracking-delivery"><MapPin size={19} /><div><span>{pickup ? t("استلام من المحل", "Restaurant collection") : t("نقطة الاستلام", "Pickup point")}</span><strong>{localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}</strong></div></div>
         <div className="tracking-items">{o.items.map((it) => <div className="tracking-item" key={it.id}><span className="tracking-item-qty">{it.quantity}</span><div><strong>{localizedName(locale, it.nameAr, it.nameEn)}</strong>{localizedName(locale, it.variantNameAr, it.variantNameEn) && <span>{localizedName(locale, it.variantNameAr, it.variantNameEn)}</span>}{it.addons.length > 0 && <span>{it.addons.map((a) => localizedName(locale, a.nameAr, a.nameEn)).join(t("، ", ", "))}</span>}{it.note && <span>{t("ملاحظة: ", "Note: ")}{it.note}</span>}</div><b>{formatMoney(it.lineTotal, locale)}</b></div>)}</div>
         <div className="tracking-bill-row"><span>{t("قيمة الأكل", "Items subtotal")}</span><span>{formatMoney(o.subtotal, locale)}</span></div>
         {o.deliveryFee > 0 && <div className="tracking-bill-row"><span>{t("التوصيل", "Delivery")}</span><span>{formatMoney(o.deliveryFee, locale)}</span></div>}

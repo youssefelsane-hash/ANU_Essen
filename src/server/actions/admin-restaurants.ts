@@ -33,6 +33,7 @@ import type { ActionState } from '../../lib/action-state';
 import { fromZonedInputValue, weeklyHoursSchema } from '../../lib/domain/hours';
 import { parseMoney, slugify } from '../../lib/domain/misc';
 import { PROMOTION_TYPES } from '../../lib/domain/pricing';
+import { FULFILLMENT_TYPES } from '../../lib/domain/order-machine';
 import { queueConfigSchema } from '../../lib/domain/queue';
 import { restaurantBrandSchema, restaurantImageUrlSchema } from '../../lib/domain/restaurant-brand';
 
@@ -76,7 +77,7 @@ export async function createRestaurantAction(_prev: ActionState, fd: FormData): 
     const [defaultCommission] = await db().select().from(systemSettings).where(eq(systemSettings.key, 'defaults.commissionBps'));
     let r;
     try {
-      r = await bootstrapRestaurant(db(), { slug, ...brand, commissionBps: typeof defaultCommission?.value === 'number' ? defaultCommission.value : 500 }, await getDefaultQueueConfig(db()));
+      r = await bootstrapRestaurant(db(), { slug, ...brand, commissionBps: typeof defaultCommission?.value === 'number' ? defaultCommission.value : 500 }, await getDefaultQueueConfig(db()), { defaultPoints: true });
     } catch (error) {
       if (isUniqueViolation(error)) throw new AppError('CONFLICT', `Slug "${slug}" is already used`);
       throw error;
@@ -207,24 +208,41 @@ export async function saveDeliveryPointAction(_prev: ActionState, fd: FormData):
     const restaurantId = uuid(str(fd, 'restaurantId'));
     const auth = await requirePermission('platform.restaurants');
     const id = str(fd, 'id');
+    const fulfillmentType = z.enum(FULFILLMENT_TYPES).parse(str(fd, 'fulfillmentType') || 'DELIVERY');
     const values = {
       restaurantId,
+      fulfillmentType,
       nameAr: z.string().min(2).parse(str(fd, 'nameAr')),
       nameEn: z.string().min(2).parse(str(fd, 'nameEn')),
-      deliveryFee: money(fd, 'deliveryFee')!,
-      extraMinutes: z.number().int().min(0).max(120).parse(int(fd, 'extraMinutes')),
+      deliveryFee: fulfillmentType === 'PICKUP' ? 0 : money(fd, 'deliveryFee')!,
+      extraMinutes: fulfillmentType === 'PICKUP' ? 0 : z.number().int().min(0).max(120).parse(int(fd, 'extraMinutes')),
       isDefault: bool(fd, 'isDefault'),
       isActive: bool(fd, 'isActive'),
       sortOrder: int(fd, 'sortOrder'),
     };
     await db().transaction(async (tx) => {
+      // Serialize point edits so two admins cannot select competing defaults.
+      const [restaurant] = await tx.select({ id: restaurants.id }).from(restaurants).where(eq(restaurants.id, restaurantId)).for('update');
+      if (!restaurant) throw new AppError('NOT_FOUND', 'Restaurant not found');
+      if (id) {
+        const [existing] = await tx.select({ id: deliveryPoints.id }).from(deliveryPoints).where(and(eq(deliveryPoints.id, uuid(id)), eq(deliveryPoints.restaurantId, restaurantId)));
+        if (!existing) throw new AppError('NOT_FOUND', 'Delivery point not found');
+      }
+      if (values.isDefault && !values.isActive) throw new AppError('VALIDATION', 'المكان الافتراضي لازم يكون متاح');
       if (values.isDefault) await tx.update(deliveryPoints).set({ isDefault: false }).where(eq(deliveryPoints.restaurantId, restaurantId));
       if (id) await tx.update(deliveryPoints).set(values).where(and(eq(deliveryPoints.id, uuid(id)), eq(deliveryPoints.restaurantId, restaurantId)));
       else await tx.insert(deliveryPoints).values(values);
+      const active = await tx.select().from(deliveryPoints).where(and(eq(deliveryPoints.restaurantId, restaurantId), eq(deliveryPoints.isActive, true)));
+      if (!active.length) throw new AppError('VALIDATION', 'لازم تسيب مكان استلام واحد متاح على الأقل');
+      if (!active.some((point) => point.isDefault)) {
+        const fallback = active.find((point) => point.fulfillmentType === 'DELIVERY') ?? active[0];
+        await tx.update(deliveryPoints).set({ isDefault: false }).where(eq(deliveryPoints.restaurantId, restaurantId));
+        await tx.update(deliveryPoints).set({ isDefault: true }).where(eq(deliveryPoints.id, fallback.id));
+      }
     });
     await audit({ actor: actor(auth), action: id ? 'delivery_point.updated' : 'delivery_point.created', entity: 'delivery_point', entityId: id || null, restaurantId, after: values });
     revalidatePath(`/admin/restaurants/${restaurantId}`);
-    return 'Delivery point saved';
+    return text(await getLocale('staff'), 'تم حفظ مكان الاستلام', 'Fulfillment point saved');
   });
 }
 
