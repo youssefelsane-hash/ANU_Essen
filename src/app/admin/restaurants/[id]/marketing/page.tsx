@@ -1,6 +1,6 @@
 import { getLocale } from '@/lib/i18n/server';
 import { text, localizedName } from '@/lib/i18n';
-import { asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { normalizeAppUrl } from '@/server/env';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
@@ -11,6 +11,8 @@ import { getRestaurant } from '@/server/services/store';
 import { deleteBannerAction, saveBannerAction, savePromotionAction } from '@/server/actions/admin-restaurants';
 import { ActionForm, SubmitButton } from '@/components/forms';
 import { QrGenerator } from '@/components/admin/qr-generator';
+import { saveLoyaltyAction } from '@/server/actions/loyalty';
+import { loyaltyStats } from '@/server/services/loyalty';
 import { Forbidden, PageTitle, RestaurantTabs } from '@/components/admin/ui';
 import { PROMOTION_TYPES } from '@/lib/domain/pricing';
 import { toZonedInputValue } from '@/lib/domain/hours';
@@ -26,10 +28,12 @@ export default async function MarketingPage({ params }: { params: Promise<{ id: 
   if (!(await adminPage(`/admin/restaurants/${id}/marketing`, 'platform.restaurants'))) return <Forbidden />;
   const r = await getRestaurant(db(), id);
   if (!r) notFound();
-  const [bannerRows, promoRows, productRows] = await Promise.all([
+  const [bannerRows, promoRows, productRows, game] = await Promise.all([
     db().select().from(banners).where(eq(banners.restaurantId, id)).orderBy(asc(banners.sortOrder)),
-    db().select().from(promotions).where(eq(promotions.restaurantId, id)).orderBy(desc(promotions.createdAt)),
+    // Personal ELSANE prize codes are counted in the game section, not listed as offers.
+    db().select().from(promotions).where(and(eq(promotions.restaurantId, id), isNull(promotions.customerPhone))).orderBy(desc(promotions.createdAt)),
     db().select({ id: products.id, nameEn: locale === 'ar' ? products.nameAr : products.nameEn }).from(products).where(eq(products.restaurantId, id)),
+    loyaltyStats(db(), id),
   ]);
 
   return (
@@ -37,6 +41,29 @@ export default async function MarketingPage({ params }: { params: Promise<{ id: 
       <PageTitle title={`${localizedName(locale, r.nameAr, r.nameEn)} — ${t("رمز الطلب والعروض", "QR & offers")}`} />
       <RestaurantTabs id={id} active="marketing" />
       <div className="space-y-6">
+        <section className="card space-y-3" id="elsane">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-bold">{t('لعبة «اجمع ELSANE»', 'The “Collect ELSANE” game')}</h2>
+            <span className={`badge ${r.loyaltyEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>{r.loyaltyEnabled ? t('شغّالة', 'On') : t('مقفولة', 'Off')}</span>
+          </div>
+          <p className="text-sm leading-7 text-gray-600">{t('كل طلب أونلاين بيتسلّم من المطعم ده بيكسب العميل حرف عشوائي من E-L-S-A-N (من غير تكرار). أول ما يجمع الخمس حروف بتكتمل كلمة ELSANE ويطلعله كود خصم ليه هو بس (بنفس رقم موبايله) على المطعم ده، وبعدين يبدأ من الأول. طلبات الكاشير مش بتحسب. الخصم بيتحسب زي أي عرض للمطعم.', 'Every delivered online order here wins the customer a random letter from E-L-S-A-N (no repeats). With all five the word ELSANE is complete and they get a personal discount code (tied to their mobile) for this restaurant, then a new card starts. Counter orders do not count. The discount works like any other restaurant offer.')}</p>
+          <ActionForm action={saveLoyaltyAction} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <input type="hidden" name="restaurantId" value={id} />
+            <label className="flex items-center gap-2 text-sm font-semibold sm:col-span-2 lg:col-span-4"><input type="checkbox" name="enabled" defaultChecked={r.loyaltyEnabled} className="h-5 w-5" /> {t('تشغيل اللعبة للمطعم ده', 'Turn the game on for this restaurant')}</label>
+            <label className="block"><span className="label">{t('قيمة الخصم (ج.م)', 'Prize (EGP off)')}</span><input name="reward" defaultValue={r.loyaltyReward / 100} className="input" inputMode="decimal" dir="ltr" /></label>
+            <label className="block"><span className="label">{t('أقل طلب يكسب حرف (ج.م) — 0 = أي طلب', 'Smallest order that earns a letter (EGP) — 0 = any')}</span><input name="minOrder" defaultValue={r.loyaltyMinOrder / 100} className="input" inputMode="decimal" dir="ltr" /></label>
+            <label className="block"><span className="label">{t('صلاحية كود الخصم (أيام)', 'Code valid for (days)')}</span><input name="voucherDays" type="number" min="1" max="365" defaultValue={r.loyaltyVoucherDays} className="input" inputMode="numeric" /></label>
+            <div className="flex items-end"><SubmitButton>{t('حفظ', 'Save')}</SubmitButton></div>
+          </ActionForm>
+          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+            <div className="rounded-xl bg-gray-50 p-3"><div className="text-xs text-gray-500">{t('عملاء بيلعبوا', 'Players')}</div><b>{game.players}</b></div>
+            <div className="rounded-xl bg-gray-50 p-3"><div className="text-xs text-gray-500">{t('حروف اتكسبت', 'Letters won')}</div><b>{game.letters}</b></div>
+            <div className="rounded-xl bg-gray-50 p-3"><div className="text-xs text-gray-500">{t('أكواد خصم طلعت', 'Codes issued')}</div><b>{game.vouchersIssued}</b></div>
+            <div className="rounded-xl bg-gray-50 p-3"><div className="text-xs text-gray-500">{t('أكواد اتستخدمت', 'Codes used')}</div><b>{game.vouchersUsed}</b></div>
+          </div>
+          <p className="text-xs text-gray-500">{t('قفل اللعبة بيوقف الحروف الجديدة بس؛ الأكواد اللي العملاء كسبوها بتفضل شغالة لحد ما تنتهي.', 'Turning it off stops new letters only; codes customers already won stay valid until they expire.')}</p>
+        </section>
+
         <section className="card">
           <h2 className="mb-3 font-bold">{t("رمز الطلب والملصق", "QR code for posters")}</h2>
           <QrGenerator restaurant={r} baseUrl={normalizeAppUrl(process.env.APP_URL) ?? null} />

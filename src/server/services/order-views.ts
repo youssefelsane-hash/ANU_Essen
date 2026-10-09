@@ -17,6 +17,7 @@ import { customerPriceTotals, publishLinePrices } from '../../lib/domain/custome
 import { expireUnpaidOrder } from './order-actions';
 import { canCustomerRequestRefund } from './refunds';
 import { canReviewOrder, reviewForOrder } from './reviews';
+import { loyaltyForOrder } from './loyalty';
 import { CUSTOMER_CANCEL_GRACE_MINUTES } from '../../lib/domain/risk';
 
 const ms = (d: Date | null | undefined) => (d ? d.getTime() : null);
@@ -212,7 +213,7 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
     loadRefunds(d, [o.id], false),
   ]);
   const orderRefunds = refundsByOrder.get(o.id) ?? [];
-  const review = o.status === 'COMPLETED' ? await reviewForOrder(d, o.id) : null;
+  const [review, loyalty] = await Promise.all([o.status === 'COMPLETED' ? reviewForOrder(d, o.id) : null, loyaltyForOrder(d, o, r)]);
   if (!r) return null;
   let instapay: TrackingView['instapay'] = null;
   if (o.paymentMethod === 'INSTAPAY') {
@@ -280,6 +281,7 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
       canRequestRefund: canCustomerRequestRefund(o) && !orderRefunds.some((x) => x.status === 'REQUESTED'),
       canReview: !review && canReviewOrder(o),
       review,
+      loyalty,
     },
     restaurant: { nameAr: r.nameAr, nameEn: r.nameEn, phone: r.phone, slug: r.slug, timezone: r.timezone },
     instapay,

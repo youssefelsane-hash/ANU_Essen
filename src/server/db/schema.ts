@@ -141,6 +141,12 @@ export const restaurants = pgTable('restaurants', {
   /** Platform courier charge per delivered order (piasters). 0 = not calculated (settled manually). */
   platformDeliveryFee: integer('platform_delivery_fee').notNull().default(0),
   platformDeliveryPayer: deliveryPayerEnum('platform_delivery_payer').notNull().default('CUSTOMER'),
+  /** "Collect ELSANE" game: one letter per completed online order, a voucher for the full word. */
+  loyaltyEnabled: boolean('loyalty_enabled').notNull().default(false),
+  loyaltyReward: integer('loyalty_reward').notNull().default(2000),
+  /** Smallest order (food after discount, piasters) that earns a letter. */
+  loyaltyMinOrder: integer('loyalty_min_order').notNull().default(0),
+  loyaltyVoucherDays: integer('loyalty_voucher_days').notNull().default(30),
   /** Historical configuration only. New COUNTER_NO_FEE orders always have zero platform share. */
   counterCommissionEnabled: boolean('counter_commission_enabled').notNull().default(true),
   requirePhone: boolean('require_phone').notNull().default(true),
@@ -388,6 +394,8 @@ export const promotions = pgTable(
     usageLimit: integer('usage_limit'),
     usedCount: integer('used_count').notNull().default(0),
     isActive: boolean('is_active').notNull().default(true),
+    /** Personal voucher (e.g. the ELSANE prize): only this phone may use the code. */
+    customerPhone: text('customer_phone'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -681,6 +689,35 @@ export const courierCashEntries = pgTable(
     check('courier_cash_entries_positive_amount', sql`${t.amount} > 0`),
     check('courier_cash_entries_kind_valid', sql`(${t.entryKind} = 'HAND_IN' and ${t.reversesEntryId} is null) or (${t.entryKind} = 'REVERSAL' and ${t.reversesEntryId} is not null)`),
   ],
+);
+
+/** A customer's ELSANE letters at one restaurant (the card resets after each completed word). */
+export const loyaltyCards = pgTable(
+  'loyalty_cards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    restaurantId: uuid('restaurant_id').notNull().references(() => restaurants.id, { onDelete: 'cascade' }),
+    customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
+    letters: text('letters').array().notNull().default(sql`'{}'::text[]`),
+    wordsCompleted: integer('words_completed').notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [unique('loyalty_cards_uq').on(t.restaurantId, t.customerId)],
+);
+
+/** One letter per completed order (idempotent), and the voucher when it finished the word. */
+export const loyaltyAwards = pgTable(
+  'loyalty_awards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    cardId: uuid('card_id').notNull().references(() => loyaltyCards.id, { onDelete: 'cascade' }),
+    orderId: uuid('order_id').notNull().unique().references(() => orders.id, { onDelete: 'cascade' }),
+    letter: text('letter').notNull(),
+    voucherPromotionId: uuid('voucher_promotion_id').references(() => promotions.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('loyalty_awards_card_idx').on(t.cardId)],
 );
 
 /** One review per finished order: overall stars for the restaurant plus optional stars per item. */

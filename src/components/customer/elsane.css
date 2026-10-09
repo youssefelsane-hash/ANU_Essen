@@ -1,0 +1,23 @@
+/* ---- ELSANE letters game ---- */
+.elsane-card { position: relative; overflow: hidden; border-radius: 20px; padding: 18px; background: linear-gradient(135deg, #17352a, #234d3b 60%, #2f6a50); color: #fff; }
+.elsane-card h2 { font-size: 18px; font-weight: 800; margin: 10px 0 4px; }
+.elsane-card p { font-size: 13px; line-height: 1.7; opacity: .9; }
+.elsane-card.is-banner { display: flex; align-items: center; gap: 16px; margin-top: 16px; }
+.elsane-card.is-win { background: linear-gradient(135deg, #7c2d12, #b45309 55%, #d97706); text-align: center; }
+.elsane-kicker { display: inline-flex; align-items: center; gap: 6px; font-size: 12px !important; font-weight: 700; letter-spacing: .02em; opacity: 1 !important; color: #fde68a; }
+.elsane-letter { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: #fde68a; color: #422006; font-weight: 900; }
+.elsane-tiles { display: flex; gap: 6px; justify-content: center; margin-top: 8px; perspective: 600px; }
+.elsane-tiles.is-sm { gap: 4px; margin: 0; flex-shrink: 0; }
+.elsane-tile { display: grid; place-items: center; width: 42px; height: 48px; border-radius: 10px; font-weight: 900; font-size: 22px; background: #ffffff1f; color: #ffffff80; border: 1px dashed #ffffff55; }
+.is-sm .elsane-tile { width: 26px; height: 30px; font-size: 14px; border-radius: 7px; }
+.elsane-tile.is-on { background: #fde68a; color: #422006; border: 0; box-shadow: 0 3px 0 #b45309; }
+.elsane-tile.is-fresh { animation: elsane-flip .9s cubic-bezier(.2,.8,.3,1.2) both; }
+@keyframes elsane-flip { 0% { transform: rotateY(180deg) scale(.6); opacity: 0; } 60% { transform: rotateY(-15deg) scale(1.15); opacity: 1; } 100% { transform: rotateY(0) scale(1); } }
+.elsane-voucher { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: #fff; color: #1c1917; text-align: start; }
+.elsane-voucher b { display: block; font-size: 18px; letter-spacing: .06em; }
+.elsane-voucher small { display: block; color: #57534e; font-size: 11px; }
+.elsane-offer { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 10px 12px; border-radius: 14px; background: #fef3c7; color: #422006; font-size: 13px; }
+.elsane-confetti span { position: absolute; top: -12px; left: calc(var(--i) * 7.5%); width: 7px; height: 12px; border-radius: 2px; background: hsl(calc(var(--i) * 37), 90%, 65%); animation: elsane-fall 2.4s ease-in calc(var(--i) * .08s) 2 both; }
+@keyframes elsane-fall { 0% { transform: translateY(0) rotate(0); opacity: 1; } 100% { transform: translateY(260px) rotate(540deg); opacity: 0; } }
+@media (max-width: 640px) { .elsane-card.is-banner { flex-direction: column; align-items: stretch; } .elsane-tile { width: 38px; height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .elsane-tile.is-fresh, .elsane-confetti span { animation: none; } }

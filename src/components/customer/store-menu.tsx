@@ -13,6 +13,7 @@ import { formatMoney } from '@/lib/domain/misc';
 import { brandTextColor } from '@/lib/domain/restaurant-brand';
 import type { CustomerQuoteResponse, PublicMenu, PublicMenuProduct } from '@/lib/types';
 import './customer.css';
+import { ElsaneMenuBanner } from './elsane';
 
 const searchable = (value: string) => value.toLowerCase().normalize('NFKD').replace(/[\u064B-\u065F]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي');
 
@@ -205,6 +206,7 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
           </div>
 
           {accepting && orderAhead && t(orderAhead.ar, orderAhead.en) && <p className="order-ahead mt-4"><AlarmClock size={22} aria-hidden="true" />{t(orderAhead.ar, orderAhead.en)}</p>}
+          {menu.restaurant.loyalty && !suspended && <ElsaneMenuBanner slug={slug} reward={menu.restaurant.loyalty.reward} minOrder={menu.restaurant.loyalty.minOrder} />}
 
           {!accepting && (
             <div className="customer-alert" role="status">

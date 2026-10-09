@@ -67,6 +67,8 @@ const MESSAGES: [string, string][] = [
   ['تم إرسال الرد', 'Reply sent'], ['اكتب ردك', 'Write your reply'], ['اكتب المشكلة بالتفصيل شوية', 'Please describe the problem in a bit more detail'],
   ['اكتب رقم موبايلك عشان نقدر نرد عليك', 'Enter your mobile number so we can reply'], ['التقييم متاح بعد استلام الطلب ولمدة أسبوع', 'You can rate an order for a week after receiving it'], ['الطلب ده اتقيّم قبل كده', 'This order was already rated'],
   ['مينفعش تدّي صلاحيات انت نفسك مش عندك', 'You cannot grant permissions you do not have yourself'], ['الحساب ده عنده صلاحيات أعلى منك؛ صاحب المنصة بس اللي يعدّله', 'This account has more permissions than you; only the platform owner can change it'],
+  ['الكود ده خاص برقم الموبايل اللي كسبه', 'This code only works with the mobile number that won it'],
+  ['قيمة الخصم لازم تكون من 1 لـ 500 ج.م', 'The prize must be between 1 and 500 EGP'], ['راجع أقل قيمة للطلب', 'Check the minimum order'],
   ['تم الحفظ', 'Saved'], ['لا يوجد تغيير', 'Nothing changed'], ['حصل خطأ غير متوقع، حاول تاني', 'Unexpected error — please try again'],
   ['بيانات غير صحيحة', 'Please check the information and try again'], ['اكتب اسمك', 'Enter your name'], ['السلة فاضية', 'Your basket is empty'],
   ['اكتب البريد الإلكتروني وكلمة المرور', 'Enter your email and password'], ['محاولات كتير. جرّب تاني بعد 15 دقيقة', 'Too many attempts. Try again in 15 minutes'], ['البريد الإلكتروني أو كلمة المرور غير صحيحة', 'Incorrect email or password'], ['الحساب ده موقوف. كلّم صاحب المطعم أو إدارة المنصة.', 'This account is blocked. Contact the restaurant owner or platform administrator.'],

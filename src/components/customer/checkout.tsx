@@ -16,6 +16,7 @@ import type { PaymentMethod } from '@/lib/domain/order-machine';
 import type { CustomerQuoteResponse, PublicMenu } from '@/lib/types';
 import { customerMessage } from './messages';
 import './customer.css';
+import { ElsaneCheckoutOffer } from './elsane';
 
 interface ApiError { error?: { code: string; message: string }; }
 interface QuoteState { key: string; data?: CustomerQuoteResponse; error?: string; }
@@ -304,6 +305,7 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
               {quote.minOrderShortfall > 0 && <p className="checkout-submit-hint">{t("الحد الأدنى ", "Minimum order ")}{formatMoney(quote.minOrderAmount, locale)}{t(". ضيف ", ". Add ")}{formatMoney(quote.minOrderShortfall, locale)}{t(" عشان تكمل.", " to continue.")}</p>}
             </> : quoteError ? <div className="quote-error" role="alert"><p>{customerMessage(quoteError, locale)}</p><button type="button" className="customer-secondary-button" disabled={submitting} onClick={() => setRefreshVersion((version) => version + 1)}>{t("تحديث حساب الطلب", "Refresh order total")}</button></div> :
               <div className="quote-loading" role="status" aria-live="polite"><p>{t("بنراجع السعر ووقت الوصول…", "Checking price and arrival time…")}</p><div /><div /><div /></div>}
+            {menu.restaurant.loyalty !== undefined && <ElsaneCheckoutOffer slug={menu.restaurant.slug} applied={promoCode} onApply={(code) => { setPromoInput(code); setPromoCode(code); }} />}
             <div className="checkout-promo">
               <button type="button" className="checkout-promo-toggle" onClick={() => setShowPromo(!showPromo)} disabled={submitting} aria-expanded={showPromo} aria-controls="promo-controls"><Tag size={14} />{promoCode ? t("كود الخصم: ", "Promo code: ") + promoCode : t("عندك كود خصم؟", "Have a promo code?")}</button>
               {showPromo && <div className="checkout-promo-controls" id="promo-controls"><input aria-label={t("كود الخصم", "Promo code")} value={promoInput} onChange={(event) => setPromoInput(event.target.value.toUpperCase())} placeholder="WELCOME10" dir="ltr" maxLength={32} disabled={!!promoCode || submitting} />{promoCode ? <button type="button" disabled={submitting} onClick={() => { setPromoCode(null); setPromoInput(''); }}>{t("إزالة", "Remove")}</button> : <button type="button" disabled={!promoInput.trim() || submitting} onClick={() => setPromoCode(promoInput.trim())}>{t("تطبيق", "Apply")}</button>}</div>}

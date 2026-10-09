@@ -18,6 +18,7 @@ import { hasPermission, type AuthzSnapshot } from '../../lib/domain/permissions'
 import { computeEta } from '../../lib/domain/queue';
 import { CUSTOMER_CANCEL_GRACE_MINUTES } from '../../lib/domain/risk';
 import { audit } from './audit';
+import { awardLetter } from './loyalty';
 import { getActiveLoad, getQueueConfig } from './store';
 
 export interface ActionActor {
@@ -208,6 +209,9 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
         .update(orders)
         .set({ ...patch, version: sql`${orders.version} + 1` })
         .where(eq(orders.id, order.id));
+
+      // Delivered online orders earn an ELSANE letter (when the restaurant plays the game).
+      if (next === 'COMPLETED') await awardLetter(tx, order, now);
 
       // A cancelled order gives its units back to tracked products.
       if (next === 'CANCELLED') {

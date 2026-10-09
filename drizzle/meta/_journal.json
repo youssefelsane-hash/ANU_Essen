@@ -71,6 +71,13 @@
       "when": 1791572169196,
       "tag": "0009_platform_ops",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791574793794,
+      "tag": "0010_elsane_letters",
+      "breakpoints": true
     }
   ]
 }
