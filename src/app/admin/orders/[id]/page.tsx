@@ -19,7 +19,7 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
   const t = (ar: string, en: string) => text(locale, ar, en);
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
-  const auth = await adminPage(`/admin/orders/${id}`, 'platform.restaurants');
+  const auth = await adminPage(`/admin/orders/${id}`, ['platform.restaurants', 'orders.view']);
   if (!auth) return <Forbidden />;
   const canViewPlatformPricing = auth.platformPermissions.has('platform.finance');
   const [snapshot] = await loadOrderSnapshots(db(), [id], { includePhone: true, includePlatformPricing: canViewPlatformPricing });
@@ -34,8 +34,9 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
         restaurantName={localizedName(locale, r?.nameAr, r?.nameEn)}
         timezone={r?.timezone ?? 'Africa/Cairo'}
         canPrint
+        canCancel={auth.platformPermissions.has('orders.cancel')}
         canRefund={auth.platformPermissions.has('payments.refund')}
-        commission={canViewPlatformPricing ? { bps: row.commissionBps, amount: row.commissionAmount, merchantNet: row.merchantNet, source: row.source } : null}
+        commission={canViewPlatformPricing ? { bps: row.commissionBps, amount: row.commissionAmount, merchantNet: row.merchantNet, source: row.source, serviceFee: row.serviceFee, platformDeliveryFee: row.platformDeliveryFee, platformDeliveryPayer: row.platformDeliveryPayer } : null}
       />
     </div>
   );

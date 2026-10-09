@@ -1,5 +1,6 @@
 'use server';
 
+import { randomBytes } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
@@ -7,6 +8,7 @@ import { db, isUniqueViolation, type Db } from '../db';
 import { permissions, rolePermissions, roles, sessions, settlements, systemSettings, userRoles, users } from '../db/schema';
 import { requirePermission } from '../auth/session';
 import type { AuthContext } from '../auth/authz';
+import { assertCanGrant, assertCanGrantRole, assertOutranks } from '../auth/delegation';
 import { hashPassword, MIN_PASSWORD_LENGTH } from '../auth/password';
 import { AppError } from '../errors';
 import { audit } from '../services/audit';
@@ -47,8 +49,9 @@ async function roleByKey(key: string, executor: Db = db()) {
   return r;
 }
 
-async function assign(userId: string, roleKey: string, restaurantIdRaw: string | null, executor: Db = db()) {
+async function assign(auth: AuthContext, userId: string, roleKey: string, restaurantIdRaw: string | null, executor: Db = db()) {
   const role = await roleByKey(roleKey, executor);
+  await assertCanGrantRole(executor, auth, role.id, role.scope);
   const restaurantId = role.scope === 'STORE' ? z.uuid().parse(restaurantIdRaw ?? '') : null;
   await executor.insert(userRoles).values({ userId, roleId: role.id, restaurantId }).onConflictDoNothing();
   return { role: role.key, restaurantId };
@@ -69,7 +72,7 @@ export async function createUserAction(_prev: ActionState, fd: FormData): Promis
     try {
       result = await db().transaction(async (tx) => {
         const [user] = await tx.insert(users).values({ email, name, phone: optStr(fd, 'phone'), passwordHash }).returning();
-        const assigned = roleKey ? await assign(user.id, roleKey, optStr(fd, 'restaurantId'), tx) : null;
+        const assigned = roleKey ? await assign(auth, user.id, roleKey, optStr(fd, 'restaurantId'), tx) : null;
         return { user, assigned };
       });
     } catch (error) {
@@ -87,7 +90,8 @@ export async function assignRoleAction(_prev: ActionState, fd: FormData): Promis
   return runAction(async () => {
     const auth = await requirePermission('platform.users');
     const userId = z.uuid().parse(str(fd, 'userId'));
-    const assigned = await assign(userId, str(fd, 'roleKey'), optStr(fd, 'restaurantId'));
+    await assertOutranks(db(), auth, userId);
+    const assigned = await assign(auth, userId, str(fd, 'roleKey'), optStr(fd, 'restaurantId'));
     await audit({ actor: actor(auth), action: 'user.role_assigned', entity: 'user', entityId: userId, restaurantId: assigned.restaurantId, after: assigned, ...(await requestMeta()) });
     revalidatePath(`/admin/users/${userId}`);
     return 'Role assigned';
@@ -103,6 +107,7 @@ export async function removeRoleAction(assignmentId: string) {
     .where(eq(userRoles.id, assignmentId));
   if (!a) throw new AppError('NOT_FOUND');
   if (a.userId === auth.user.id && a.key === 'SUPER_ADMIN') throw new AppError('FORBIDDEN', 'You cannot remove your own super admin role');
+  await assertOutranks(db(), auth, a.userId);
   if (a.key === 'DELIVERY_STAFF') {
     await removeCourierAssignment({ assignmentId, origin: 'PLATFORM', actor: { auth, ...(await requestMeta()) } });
     revalidatePath(`/admin/users/${a.userId}`);
@@ -118,6 +123,7 @@ export async function removeRoleAction(assignmentId: string) {
 export async function setUserActiveAction(userId: string, active: boolean) {
   const auth = await requirePermission('platform.users');
   if (userId === auth.user.id && !active) throw new AppError('FORBIDDEN', 'You cannot disable yourself');
+  await assertOutranks(db(), auth, userId);
   await db().update(users).set({ isActive: active, updatedAt: new Date() }).where(eq(users.id, userId));
   if (!active) await db().delete(sessions).where(eq(sessions.userId, userId)); // sign out everywhere
   await audit({ actor: actor(auth), action: active ? 'user.enabled' : 'user.disabled', entity: 'user', entityId: userId });
@@ -131,6 +137,7 @@ export async function resetPasswordAction(_prev: ActionState, fd: FormData): Pro
     const userId = z.uuid().parse(str(fd, 'userId'));
     const password = str(fd, 'password');
     if (password.length < MIN_PASSWORD_LENGTH) throw new AppError('VALIDATION', `Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+    await assertOutranks(db(), auth, userId);
     await db().update(users).set({ passwordHash: await hashPassword(password), updatedAt: new Date() }).where(eq(users.id, userId));
     await db().delete(sessions).where(eq(sessions.userId, userId));
     await audit({ actor: actor(auth), action: 'user.password_reset', entity: 'user', entityId: userId, ...(await requestMeta()) });
@@ -150,12 +157,18 @@ export async function saveRoleAction(_prev: ActionState, fd: FormData): Promise<
       if (!role) throw new AppError('NOT_FOUND');
       if (role.key === 'SUPER_ADMIN') throw new AppError('FORBIDDEN', 'SUPER_ADMIN always has every permission');
     } else {
-      const key = z.string().regex(/^[A-Z][A-Z0-9_]{2,40}$/, 'Key: UPPER_CASE letters').parse(str(fd, 'key'));
+      const name = z.string().trim().min(2).max(60).parse(str(fd, 'name'));
+      // The internal code is generated: owners shouldn't have to invent UPPER_CASE identifiers.
+      const typed = str(fd, 'key').toUpperCase();
+      const base = /^[A-Z][A-Z0-9_]{2,40}$/.test(typed) ? typed : (name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30) || 'CUSTOM');
+      const key = `${/^[A-Z]/.test(base) ? base : `ROLE_${base}`}_${randomBytes(2).toString('hex').toUpperCase()}`;
       const scope = z.enum(['PLATFORM', 'STORE']).parse(str(fd, 'scope'));
-      [role] = await db().insert(roles).values({ key, name: z.string().min(2).parse(str(fd, 'name')), scope, description: optStr(fd, 'description') }).returning();
+      [role] = await db().insert(roles).values({ key, name, scope, description: optStr(fd, 'description') }).returning();
     }
     // A store role can never hold platform permissions.
     const valid = granted.filter((g) => allPerms.some((p) => p.key === g && (role.scope === 'PLATFORM' || p.scope === 'STORE')));
+    // Nobody grants a platform role more than they hold (no self-promotion through role edits).
+    if (role.scope === 'PLATFORM') assertCanGrant(auth, valid);
     const before = (await db().select().from(rolePermissions).where(eq(rolePermissions.roleId, role.id))).map((r) => r.permissionKey);
     await db().transaction(async (tx) => {
       await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, role.id));
@@ -174,6 +187,8 @@ export async function saveSettingsAction(_prev: ActionState, fd: FormData): Prom
     const auth = await requirePermission('platform.settings');
     const pct = Number(str(fd, 'defaultCommissionPercent'));
     if (!Number.isFinite(pct) || pct < 0 || pct > 50) throw new AppError('VALIDATION', 'Commission must be 0–50%');
+    const defaultServiceFee = parseMoney(str(fd, 'defaultServiceFee') || '0');
+    if (defaultServiceFee === null || defaultServiceFee > 50_000) throw new AppError('VALIDATION', 'راجع مبالغ رسوم المنصة والتوصيل (من 0 لـ 500 ج.م)');
     const tz = str(fd, 'timezone') || 'Africa/Cairo';
     try {
       new Intl.DateTimeFormat('en', { timeZone: tz });
@@ -184,6 +199,7 @@ export async function saveSettingsAction(_prev: ActionState, fd: FormData): Prom
       ['platform.name', z.string().min(2).max(60).parse(str(fd, 'platformName'))],
       ['platform.timezone', tz],
       ['defaults.commissionBps', Math.round(pct * 100)],
+      ['defaults.serviceFee', defaultServiceFee],
     ];
     const before = await db().select().from(systemSettings);
     for (const [key, value] of entries) {

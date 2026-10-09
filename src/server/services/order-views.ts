@@ -16,6 +16,8 @@ import type { OrderSnapshot, RefundView, SnapshotItem, TimelineEntry, TrackingVi
 import { customerPriceTotals, publishLinePrices } from '../../lib/domain/customer-pricing';
 import { expireUnpaidOrder } from './order-actions';
 import { canCustomerRequestRefund } from './refunds';
+import { canReviewOrder, reviewForOrder } from './reviews';
+import { CUSTOMER_CANCEL_GRACE_MINUTES } from '../../lib/domain/risk';
 
 const ms = (d: Date | null | undefined) => (d ? d.getTime() : null);
 
@@ -40,6 +42,7 @@ async function loadItems(d: Db, orderIds: string[]): Promise<Map<string, Snapsho
     const list = byOrder.get(i.orderId) ?? [];
     list.push({
       id: i.id,
+      productId: i.productId,
       nameAr: i.productNameAr,
       nameEn: i.productNameEn,
       variantNameAr: i.variantNameAr,
@@ -130,6 +133,7 @@ export async function loadOrderSnapshots(d: Db, orderIds: string[], opts: Snapsh
       total: o.total,
       platformFeeAmount: o.platformFeeAmount,
       platformFeeBps: o.pricingMode === 'ONLINE_PLATFORM_FEE' ? o.commissionBps : 0,
+      serviceFee: o.serviceFee,
     });
     const timeline: TimelineEntry[] = eventRows
       .filter((e) => e.orderId === o.id)
@@ -167,6 +171,7 @@ export async function loadOrderSnapshots(d: Db, orderIds: string[], opts: Snapsh
       subtotal: opts.includePlatformPricing ? o.subtotal : customerTotals.subtotal,
       discountTotal: opts.includePlatformPricing ? o.discountTotal : customerTotals.discount,
       deliveryFee: customerTotals.deliveryFee,
+      serviceFee: o.serviceFee,
       total: o.total,
       currency: o.currency,
       promoCode: o.promoCode,
@@ -207,6 +212,7 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
     loadRefunds(d, [o.id], false),
   ]);
   const orderRefunds = refundsByOrder.get(o.id) ?? [];
+  const review = o.status === 'COMPLETED' ? await reviewForOrder(d, o.id) : null;
   if (!r) return null;
   let instapay: TrackingView['instapay'] = null;
   if (o.paymentMethod === 'INSTAPAY') {
@@ -232,6 +238,7 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
     total: o.total,
     platformFeeAmount: o.platformFeeAmount,
     platformFeeBps: o.pricingMode === 'ONLINE_PLATFORM_FEE' ? o.commissionBps : 0,
+    serviceFee: o.serviceFee,
   });
   const rawItems = itemsByOrder.get(o.id) ?? [];
   return {
@@ -252,6 +259,7 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
       subtotal: customerTotals.subtotal,
       discountTotal: customerTotals.discount,
       deliveryFee: customerTotals.deliveryFee,
+      serviceFee: o.serviceFee,
       total: o.total,
       estimatedReadyAt: ms(o.estimatedReadyAt),
       estimatedArrivalAt: ms(o.estimatedArrivalAt),
@@ -265,9 +273,13 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
       cancelledAt: ms(o.cancelledAt),
       cancelReason: o.cancelReason,
       paymentDeadlineAt: o.status === 'AWAITING_PAYMENT' && r.unpaidTimeoutMinutes > 0 ? o.updatedAt.getTime() + r.unpaidTimeoutMinutes * 60_000 : null,
+      version: o.version,
+      cancelGraceUntil: o.status === 'CONFIRMED' && o.paymentMethod === 'CASH' && o.channel === 'ONLINE' && o.confirmedAt ? o.confirmedAt.getTime() + CUSTOMER_CANCEL_GRACE_MINUTES * 60_000 : null,
       refundedTotal: o.refundedTotal,
       refunds: orderRefunds,
       canRequestRefund: canCustomerRequestRefund(o) && !orderRefunds.some((x) => x.status === 'REQUESTED'),
+      canReview: !review && canReviewOrder(o),
+      review,
     },
     restaurant: { nameAr: r.nameAr, nameEn: r.nameEn, phone: r.phone, slug: r.slug, timezone: r.timezone },
     instapay,

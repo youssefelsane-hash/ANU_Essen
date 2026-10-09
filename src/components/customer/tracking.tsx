@@ -61,16 +61,22 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
   const live = !done || !!openRefund;
   const inFlight = useRef(false);
 
-  const refresh = useCallback(async () => {
+  // Polls send the known version; the server answers "unchanged" with one tiny query.
+  const versionRef = useRef<number | undefined>(initial.order.version);
+  const refresh = useCallback(async (full?: unknown) => {
     if (inFlight.current) return;
     inFlight.current = true;
     const started = Date.now();
     try {
-      const res = await fetch(`/api/public/orders/${token}`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+      const known = full !== true && versionRef.current ? `?v=${versionRef.current}` : '';
+      const res = await fetch(`/api/public/orders/${token}${known}`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
       if (res.ok) {
-        const data = (await res.json()) as TrackingView;
+        const data = (await res.json()) as TrackingView | { unchanged: true; serverTime: number };
         setOffset(data.serverTime - (started + Date.now()) / 2);
-        setView(data);
+        if (!('unchanged' in data)) {
+          versionRef.current = data.order.version;
+          setView(data);
+        }
         setStale(false);
       } else {
         setStale(true);
@@ -81,6 +87,8 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
       inFlight.current = false;
     }
   }, [token]);
+  /** After the customer's own action: always reload everything. */
+  const refreshFull = useCallback(() => refresh(true), [refresh]);
 
   // Polling sync (the reliable channel): fast while visible, slow in background, stops when finished.
   useEffect(() => {
@@ -141,7 +149,7 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
         {!provisional && <div className="tracking-eta-foot">{t("الوقت تقديري وبيتحدّث مع حالة طلبك", "Timing is estimated and changes with your order status")}</div>}
       </section>}
 
-      {o.status === 'AWAITING_PAYMENT' && view.instapay && <PaymentCard view={view} token={token} now={now} onSubmitted={refresh} />}
+      {o.status === 'AWAITING_PAYMENT' && view.instapay && <PaymentCard view={view} token={token} now={now} onSubmitted={refreshFull} />}
       {o.status === 'PAYMENT_REVIEW' && <section className="tracking-state-card"><div className="tracking-state-icon"><Clock3 size={23} /></div><div><h2>{t("التحويل تحت المراجعة", "Your transfer is being checked")}</h2><p>{t("المطعم بيتأكد من التحويل قبل بدء التحضير. هنحدّثك هنا أول ما يتأكد.", "The restaurant checks your transfer before preparing your order. We'll update this page when it's verified.")}</p></div></section>}
       {o.status === 'CREATED' && <section className="tracking-state-card"><div className="tracking-state-icon"><ShoppingBag size={23} /></div><div><h2>{t("طلبك وصل للمطعم", "The restaurant received your order")}</h2><p>{t("في انتظار قبول الطلب. الدفع كاش عند الاستلام.", "Waiting for the restaurant to accept. Pay cash at pickup.")}</p></div></section>}
       {pickup && o.status === 'READY' && <section className="tracking-arrived"><Store size={30} /><h2>{t("طلبك جاهز! استلمه من المطعم", "Your order is ready! Collect it at the restaurant")}</h2><p>{t("قول للكاشير رقم الطلب ", "Tell the cashier your order number ")}<b dir="ltr">#{o.orderNumber}</b>{o.paymentMethod === 'CASH' && o.paymentStatus !== 'PAYMENT_VERIFIED' ? t(' وادفع ', ' and pay ') + formatMoney(o.total, locale) : ''}.</p></section>}
@@ -165,14 +173,23 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
         <div className="tracking-items">{o.items.map((it) => <div className="tracking-item" key={it.id}><span className="tracking-item-qty">{it.quantity}</span><div><strong>{localizedName(locale, it.nameAr, it.nameEn)}</strong>{localizedName(locale, it.variantNameAr, it.variantNameEn) && <span>{localizedName(locale, it.variantNameAr, it.variantNameEn)}</span>}{it.addons.length > 0 && <span>{it.addons.map((a) => localizedName(locale, a.nameAr, a.nameEn)).join(t("، ", ", "))}</span>}{it.note && <span>{t("ملاحظة: ", "Note: ")}{it.note}</span>}</div><b>{formatMoney(it.lineTotal, locale)}</b></div>)}</div>
         <div className="tracking-bill-row"><span>{t("قيمة الأكل", "Items subtotal")}</span><span>{formatMoney(o.subtotal, locale)}</span></div>
         {o.deliveryFee > 0 && <div className="tracking-bill-row"><span>{t("التوصيل", "Delivery")}</span><span>{formatMoney(o.deliveryFee, locale)}</span></div>}
+        {(o.serviceFee ?? 0) > 0 && <div className="tracking-bill-row"><span>{t("رسوم الخدمة", "Service fee")}</span><span>{formatMoney(o.serviceFee ?? 0, locale)}</span></div>}
         {o.discountTotal > 0 && <div className="tracking-bill-row is-discount"><span>{t("الخصم", "Discount")}</span><span>− {formatMoney(o.discountTotal, locale)}</span></div>}
         <div className="tracking-total"><span>{t("الإجمالي", "Total")}</span><strong>{formatMoney(o.total, locale)}</strong></div>
         {o.refundedTotal > 0 && <div className="tracking-bill-row is-discount"><span>{o.paymentStatus === 'REFUNDED' ? t("اترجعلك المبلغ كله", "Fully refunded to you") : t("اترجعلك", "Refunded to you")}</span><span>{formatMoney(o.refundedTotal, locale)}</span></div>}
         <div className="tracking-payment-method"><span>{o.paymentMethod === 'INSTAPAY' ? t('إنستاباي', 'InstaPay') : t("كاش عند الاستلام", "Cash on pickup")}</span>{o.paymentStatus === 'PAYMENT_VERIFIED' && <span><CheckCheck size={14} />{t("تم تأكيد الدفع", "Payment verified")}</span>}</div>
       </section>
-      <RefundStatus refunds={refunds} canRequest={o.canRequestRefund} paymentMethod={o.paymentMethod} token={token} onDone={refresh} />
+      {(o.canReview || o.review) && <ReviewCard view={view} token={token} onDone={refreshFull} />}
+      <RefundStatus refunds={refunds} canRequest={o.canRequestRefund} paymentMethod={o.paymentMethod} token={token} onDone={refreshFull} />
       {view.restaurant.phone && <a href={`tel:${view.restaurant.phone}`} className="tracking-contact"><Phone size={19} /><span><strong>{t("محتاج مساعدة في طلبك؟", "Need help with your order?")}</strong><small>{t("كلم المطعم مباشرة", "Call the restaurant directly")}</small></span><ArrowRight className="directional-arrow" size={17} /></a>}
-      {(o.status === 'AWAITING_PAYMENT' || o.status === 'CREATED') && <CancelButton token={token} onDone={refresh} />}
+      {(o.status === 'AWAITING_PAYMENT' || o.status === 'CREATED') && <CancelButton token={token} onDone={refreshFull} />}
+      {o.status === 'CONFIRMED' && o.cancelGraceUntil && o.cancelGraceUntil > now && (
+        <div className="space-y-1">
+          <p className="text-center text-xs text-gray-500">{t("غيّرت رأيك؟ تقدر تلغي خلال ", "Changed your mind? You can cancel within ")}<span dir="ltr" className="font-mono">{mmss(o.cancelGraceUntil - now)}</span></p>
+          <CancelButton token={token} onDone={refreshFull} />
+        </div>
+      )}
+      <Link href={`/support?order=${encodeURIComponent(token)}`} className="tracking-contact"><AlertCircle size={19} /><span><strong>{t("في مشكلة في الطلب؟", "A problem with this order?")}</strong><small>{t("ابعت شكوى للمطعم وفريق المنصة", "Send it to the restaurant and our team")}</small></span><ArrowRight className="directional-arrow" size={17} /></Link>
       <p className="tracking-privacy">{t("رابط المتابعة خاص بطلبك. شاركه مع شخص تثق به فقط.", "This tracking link is private. Share it only with someone you trust.")}</p>
       </aside>
       </div>
@@ -305,6 +322,74 @@ function PaymentCard({ view, token, now, onSubmitted }: { view: TrackingView; to
       {deadlineLeft !== null && deadlineLeft > 0 && (
         <p className="text-center text-xs text-gray-500">{t("لو مفيش تحويل خلال ", "If payment isn't sent within ")}<span dir="ltr" className="font-mono">{mmss(deadlineLeft)}</span>{t(" الطلب هيتلغي تلقائيًا", " the order will be cancelled automatically")}</p>
       )}
+    </section>
+  );
+}
+
+function Stars({ value, onChange, label, size = 30 }: { value: number; onChange?: (v: number) => void; label: string; size?: number }) {
+  return (
+    <div className="flex gap-1" role={onChange ? 'radiogroup' : undefined} aria-label={label}>
+      {[1, 2, 3, 4, 5].map((n) => onChange ? (
+        <button key={n} type="button" role="radio" aria-checked={value === n} aria-label={`${n}`} onClick={() => onChange(n)} className="leading-none" style={{ fontSize: size, color: n <= value ? '#d97706' : '#d6d3d1' }}>★</button>
+      ) : <span key={n} aria-hidden="true" style={{ fontSize: size, color: n <= value ? '#d97706' : '#d6d3d1' }}>★</span>)}
+    </div>
+  );
+}
+
+/** After delivery: rate the restaurant (required) and each dish (optional), once. */
+function ReviewCard({ view, token, onDone }: { view: TrackingView; token: string; onDone: () => void }) {
+  const { locale, t } = useLanguage();
+  const o = view.order;
+  const [rating, setRating] = useState(0);
+  const [itemRatings, setItemRatings] = useState<Record<string, number>>({});
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  if (o.review) {
+    return <section className="card space-y-2" aria-live="polite">
+      <h2 className="font-bold">{t('شكرًا على تقييمك', 'Thanks for your rating')}</h2>
+      <Stars value={o.review.rating} label={t('تقييمك', 'Your rating')} size={22} />
+      {o.review.comment && <p className="text-sm text-gray-600">{o.review.comment}</p>}
+      {o.review.reply && <p className="rounded-lg bg-gray-50 p-2 text-sm"><b>{t('رد المطعم: ', 'Restaurant: ')}</b>{o.review.reply}</p>}
+    </section>;
+  }
+  const productIds = [...new Map(o.items.filter((i) => i.productId).map((i) => [i.productId!, i])).values()];
+  async function submit() {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/public/orders/${token}/review`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(10000),
+        body: JSON.stringify({ rating, comment: comment.trim() || null, items: Object.entries(itemRatings).map(([productId, r]) => ({ productId, rating: r })) }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error?.message || t('تعذّر إرسال التقييم. جرّب تاني.', "We couldn't send your rating. Please try again."));
+      }
+    } catch { setError(t('النت ضعيف — حاول تاني', 'The connection is unstable. Please try again.')); }
+    setBusy(false);
+    onDone();
+  }
+  return (
+    <section className="card space-y-3">
+      <h2 className="font-bold">{t('إيه رأيك في طلبك من ', 'How was your order from ')}{localizedName(locale, view.restaurant.nameAr, view.restaurant.nameEn)}{t('؟', '?')}</h2>
+      <Stars value={rating} onChange={setRating} label={t('تقييم المطعم', 'Rate the restaurant')} />
+      {rating > 0 && <>
+        {productIds.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs text-gray-500">{t('قيّم كل صنف (اختياري):', 'Rate each dish (optional):')}</p>
+            {productIds.map((it) => (
+              <div key={it.productId} className="flex items-center justify-between gap-2 text-sm">
+                <span className="truncate">{localizedName(locale, it.nameAr, it.nameEn)}</span>
+                <Stars value={itemRatings[it.productId!] ?? 0} onChange={(v) => setItemRatings((m) => ({ ...m, [it.productId!]: v }))} label={localizedName(locale, it.nameAr, it.nameEn)} size={20} />
+              </div>
+            ))}
+          </div>
+        )}
+        <textarea className="input" rows={2} maxLength={500} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={t('تعليق للمطعم (اختياري)', 'A comment for the restaurant (optional)')} aria-label={t('تعليق', 'Comment')} />
+        <button type="button" className="btn btn-primary w-full" disabled={busy} onClick={submit}>{busy ? t('جاري الإرسال…', 'Sending…') : t('إرسال التقييم', 'Send rating')}</button>
+      </>}
+      {error && <p className="text-xs text-red-700" role="alert">{customerMessage(error, locale)}</p>}
     </section>
   );
 }

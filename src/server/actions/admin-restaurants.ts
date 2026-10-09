@@ -31,11 +31,18 @@ import { bootstrapRestaurant } from '../seed';
 import { bool, int, json, optStr, requestMeta, runAction, str } from './util';
 import type { ActionState } from '../../lib/action-state';
 import { fromZonedInputValue, weeklyHoursSchema } from '../../lib/domain/hours';
-import { parseMoney, slugify } from '../../lib/domain/misc';
+import { looksLikeUrl, parseMoney, slugify } from '../../lib/domain/misc';
 import { PROMOTION_TYPES } from '../../lib/domain/pricing';
 import { queueConfigSchema } from '../../lib/domain/queue';
 import { restaurantBrandSchema, restaurantImageUrlSchema } from '../../lib/domain/restaurant-brand';
 
+/** EGP amount from a form (0–500), stored as piasters. */
+function platformMoney(fd: FormData, key: string): number {
+  const value = parseMoney(str(fd, key) || '0');
+  if (value === null || value > 50_000) throw new AppError('VALIDATION', 'راجع مبالغ رسوم المنصة والتوصيل (من 0 لـ 500 ج.م)');
+  return value;
+}
+const SLUG_NOT_URL = 'اسم رابط المنيو كلمة قصيرة بالإنجليزي زي al-raya، مش رابط صورة أو موقع';
 const actor = (auth: AuthContext) => ({ type: 'USER' as const, userId: auth.user.id, label: auth.user.name });
 const uuid = (v: string) => z.uuid().parse(v);
 const webUrl = z.url().refine((value) => {
@@ -69,14 +76,20 @@ export async function createRestaurantAction(_prev: ActionState, fd: FormData): 
   const res = await runAction(async () => {
     const auth = await requirePermission('platform.restaurants');
     const brand = restaurantBrandSchema.parse({ nameAr: str(fd, 'nameAr'), nameEn: str(fd, 'nameEn'), badgeText: optStr(fd, 'badgeText'), badgeTextEn: optStr(fd, 'badgeTextEn'), taglineAr: optStr(fd, 'taglineAr'), taglineEn: optStr(fd, 'taglineEn'), brandColor: optStr(fd, 'brandColor') ?? undefined, logoUrl: optStr(fd, 'logoUrl'), coverImageUrl: optStr(fd, 'coverImageUrl') });
+    if (looksLikeUrl(str(fd, 'slug'))) throw new AppError('VALIDATION', SLUG_NOT_URL);
     const slug = slugify(str(fd, 'slug') || brand.nameEn);
     if (!slug) throw new AppError('VALIDATION', 'Slug is required (latin letters/numbers)');
     const [taken] = await db().select({ id: restaurants.id }).from(restaurants).where(eq(restaurants.slug, slug));
     if (taken) throw new AppError('CONFLICT', `Slug "${slug}" is already used`);
     const [defaultCommission] = await db().select().from(systemSettings).where(eq(systemSettings.key, 'defaults.commissionBps'));
+    const [defaultServiceFee] = await db().select().from(systemSettings).where(eq(systemSettings.key, 'defaults.serviceFee'));
     let r;
     try {
-      r = await bootstrapRestaurant(db(), { slug, ...brand, commissionBps: typeof defaultCommission?.value === 'number' ? defaultCommission.value : 500 }, await getDefaultQueueConfig(db()));
+      r = await bootstrapRestaurant(db(), {
+        slug, ...brand,
+        commissionBps: typeof defaultCommission?.value === 'number' ? defaultCommission.value : 500,
+        serviceFee: typeof defaultServiceFee?.value === 'number' ? defaultServiceFee.value : 0,
+      }, await getDefaultQueueConfig(db()));
     } catch (error) {
       if (isUniqueViolation(error)) throw new AppError('CONFLICT', `Slug "${slug}" is already used`);
       throw error;
@@ -95,6 +108,7 @@ export async function updateRestaurantAction(_prev: ActionState, fd: FormData): 
     const id = uuid(str(fd, 'id'));
     const auth = await requirePermission('platform.restaurants');
     const before = await restaurantOrThrow(id);
+    if (looksLikeUrl(str(fd, 'slug'))) throw new AppError('VALIDATION', SLUG_NOT_URL);
     const slug = slugify(str(fd, 'slug'));
     if (!slug) throw new AppError('VALIDATION', 'Slug is required');
     if (slug !== before.slug) {
@@ -119,6 +133,9 @@ export async function updateRestaurantAction(_prev: ActionState, fd: FormData): 
       orderingStatus: z.enum(['OPEN', 'PAUSED', 'CLOSED']).parse(str(fd, 'orderingStatus')),
       minOrderAmount: money(fd, 'minOrder')!,
       commissionBps: Math.round(commissionPercent * 100),
+      serviceFee: platformMoney(fd, 'serviceFee'),
+      platformDeliveryFee: platformMoney(fd, 'platformDeliveryFee'),
+      platformDeliveryPayer: z.enum(['CUSTOMER', 'RESTAURANT']).catch('CUSTOMER').parse(str(fd, 'platformDeliveryPayer')),
       requirePhone: bool(fd, 'requirePhone'),
       counterCommissionEnabled: false,
       unpaidTimeoutMinutes: z.number().int().min(0).max(1440).parse(int(fd, 'unpaidTimeoutMinutes')),
@@ -134,8 +151,13 @@ export async function updateRestaurantAction(_prev: ActionState, fd: FormData): 
     }
     const meta = await requestMeta();
     await audit({ actor: actor(auth), action: 'restaurant.updated', entity: 'restaurant', entityId: id, restaurantId: id, before: changes.before, after: changes.after, ...meta });
-    if (patch.commissionBps !== before.commissionBps) {
-      await audit({ actor: actor(auth), action: 'restaurant.commission_changed', entity: 'restaurant', entityId: id, restaurantId: id, before: { commissionBps: before.commissionBps }, after: { commissionBps: patch.commissionBps }, ...meta });
+    if (patch.commissionBps !== before.commissionBps || patch.serviceFee !== before.serviceFee || patch.platformDeliveryFee !== before.platformDeliveryFee || patch.platformDeliveryPayer !== before.platformDeliveryPayer) {
+      await audit({
+        actor: actor(auth), action: 'restaurant.commission_changed', entity: 'restaurant', entityId: id, restaurantId: id,
+        before: { commissionBps: before.commissionBps, serviceFee: before.serviceFee, platformDeliveryFee: before.platformDeliveryFee, platformDeliveryPayer: before.platformDeliveryPayer },
+        after: { commissionBps: patch.commissionBps, serviceFee: patch.serviceFee, platformDeliveryFee: patch.platformDeliveryFee, platformDeliveryPayer: patch.platformDeliveryPayer },
+        ...meta,
+      });
     }
     revalidatePath(`/admin/restaurants/${id}`);
     revalidatePath(`/admin/restaurants/${id}/marketing`);
@@ -266,9 +288,11 @@ export async function saveCategoryAction(_prev: ActionState, fd: FormData): Prom
     const restaurantId = uuid(str(fd, 'restaurantId'));
     const auth = await requirePermission('menu.manage', restaurantId);
     const id = str(fd, 'id');
+    const nameAr = z.string().min(1).max(60).parse(str(fd, 'nameAr'));
     const values = {
-      nameAr: z.string().min(1).max(60).parse(str(fd, 'nameAr')),
-      nameEn: z.string().min(1).max(60).parse(str(fd, 'nameEn')),
+      nameAr,
+      // English is optional for owners: the Arabic name is used until they add one.
+      nameEn: z.string().min(1).max(60).parse(str(fd, 'nameEn') || nameAr),
       sortOrder: int(fd, 'sortOrder'),
       isActive: bool(fd, 'isActive'),
       updatedAt: new Date(),
@@ -284,7 +308,7 @@ export async function saveCategoryAction(_prev: ActionState, fd: FormData): Prom
 const variantRowSchema = z.object({
   id: z.string().optional(),
   nameAr: z.string().trim().min(1),
-  nameEn: z.string().trim().min(1),
+  nameEn: z.string().trim().optional().default(''),
   price: z.union([z.string(), z.number()]),
   prepLoadUnits: z.union([z.string(), z.number()]).optional(),
   isAvailable: z.boolean().default(true),
@@ -292,7 +316,7 @@ const variantRowSchema = z.object({
 const addonRowSchema = z.object({
   id: z.string().optional(),
   nameAr: z.string().trim().min(1),
-  nameEn: z.string().trim().min(1),
+  nameEn: z.string().trim().optional().default(''),
   price: z.union([z.string(), z.number()]),
   isAvailable: z.boolean().default(true),
 });
@@ -317,7 +341,7 @@ export async function saveProductAction(_prev: ActionState, fd: FormData): Promi
     const values = {
       categoryId,
       nameAr: z.string().min(1).max(80).parse(str(fd, 'nameAr')),
-      nameEn: z.string().min(1).max(80).parse(str(fd, 'nameEn')),
+      nameEn: z.string().min(1).max(80).parse(str(fd, 'nameEn') || str(fd, 'nameAr')),
       descriptionAr: optStr(fd, 'descriptionAr'),
       descriptionEn: optStr(fd, 'descriptionEn'),
       imageUrl: restaurantImageUrlSchema.parse(optStr(fd, 'imageUrl')),
@@ -326,6 +350,9 @@ export async function saveProductAction(_prev: ActionState, fd: FormData): Promi
       sortOrder: int(fd, 'sortOrder'),
       isAvailable: bool(fd, 'isAvailable'),
       isActive: bool(fd, 'isActive'),
+      trackStock: bool(fd, 'trackStock'),
+      stockQty: z.number().int().min(0).max(100_000).parse(int(fd, 'stockQty', 0)),
+      showStock: bool(fd, 'showStock'),
       updatedAt: new Date(),
     };
     const variantRows = z.array(variantRowSchema).max(20).parse(json(fd, 'variants') ?? []);
@@ -351,7 +378,7 @@ export async function saveProductAction(_prev: ActionState, fd: FormData): Promi
         const lu = row.prepLoadUnits === '' || row.prepLoadUnits === undefined ? null : Number(row.prepLoadUnits);
         const match = row.id ? existing.find((v) => v.id === row.id) : undefined;
         const variantLoad = canLoad ? (lu !== null && Number.isFinite(lu) ? Math.max(0, Math.trunc(lu)) : null) : (match?.prepLoadUnits ?? null);
-        const v = { nameAr: row.nameAr, nameEn: row.nameEn, price, prepLoadUnits: variantLoad, isAvailable: row.isAvailable, sortOrder: i, isDefault: i === 0 };
+        const v = { nameAr: row.nameAr, nameEn: row.nameEn || row.nameAr, price, prepLoadUnits: variantLoad, isAvailable: row.isAvailable, sortOrder: i, isDefault: i === 0 };
         if (match) {
           await tx.update(productVariants).set(v).where(eq(productVariants.id, match.id));
           keep.add(match.id);
@@ -395,7 +422,7 @@ export async function saveAddonGroupAction(_prev: ActionState, fd: FormData): Pr
     if (maxSelect > 0 && minSelect > maxSelect) throw new AppError('VALIDATION', 'min cannot exceed max');
     const values = {
       nameAr: z.string().min(1).parse(str(fd, 'nameAr')),
-      nameEn: z.string().min(1).parse(str(fd, 'nameEn')),
+      nameEn: z.string().min(1).parse(str(fd, 'nameEn') || str(fd, 'nameAr')),
       minSelect,
       maxSelect,
       sortOrder: int(fd, 'sortOrder'),
@@ -417,7 +444,7 @@ export async function saveAddonGroupAction(_prev: ActionState, fd: FormData): Pr
       for (const [i, row] of rows.entries()) {
         const price = parseMoney(row.price);
         if (price === null) throw new AppError('VALIDATION', `Addon ${row.nameEn}: invalid price`);
-        const v = { nameAr: row.nameAr, nameEn: row.nameEn, price, isAvailable: row.isAvailable, sortOrder: i };
+        const v = { nameAr: row.nameAr, nameEn: row.nameEn || row.nameAr, price, isAvailable: row.isAvailable, sortOrder: i };
         const match = row.id ? existing.find((a) => a.id === row.id) : undefined;
         if (match) {
           await tx.update(addons).set(v).where(eq(addons.id, match.id));

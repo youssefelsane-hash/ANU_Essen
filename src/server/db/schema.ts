@@ -49,6 +49,10 @@ export const fulfillmentEnum = pgEnum('fulfillment', FULFILLMENTS);
 export const pricingModeEnum = pgEnum('pricing_mode', PRICING_MODES);
 export const refundStatusEnum = pgEnum('refund_status', ['REQUESTED', 'COMPLETED', 'REJECTED']);
 export const orderChannelEnum = pgEnum('order_channel', ORDER_CHANNELS);
+/** Who pays the platform's delivery charge: added to the customer's bill, or deducted from the restaurant's share. */
+export const deliveryPayerEnum = pgEnum('delivery_payer', ['CUSTOMER', 'RESTAURANT']);
+export const ticketStatusEnum = pgEnum('ticket_status', ['OPEN', 'ANSWERED', 'CLOSED']);
+export const ticketCategoryEnum = pgEnum('ticket_category', ['ORDER', 'FOOD', 'DELIVERY', 'PAYMENT', 'APP', 'SUGGESTION', 'OTHER']);
 
 // ---------------------------------------------------------------- identity & RBAC
 
@@ -132,6 +136,11 @@ export const restaurants = pgTable('restaurants', {
   openingHours: jsonb('opening_hours').$type<WeeklyHours | null>(),
   minOrderAmount: integer('min_order_amount').notNull().default(0),
   commissionBps: integer('commission_bps').notNull().default(500),
+  /** Fixed platform fee added to every online order (piasters), on top of the percentage. */
+  serviceFee: integer('service_fee').notNull().default(0),
+  /** Platform courier charge per delivered order (piasters). 0 = not calculated (settled manually). */
+  platformDeliveryFee: integer('platform_delivery_fee').notNull().default(0),
+  platformDeliveryPayer: deliveryPayerEnum('platform_delivery_payer').notNull().default('CUSTOMER'),
   /** Historical configuration only. New COUNTER_NO_FEE orders always have zero platform share. */
   counterCommissionEnabled: boolean('counter_commission_enabled').notNull().default(true),
   requirePhone: boolean('require_phone').notNull().default(true),
@@ -273,11 +282,20 @@ export const products = pgTable(
     sortOrder: integer('sort_order').notNull().default(0),
     /** Kitchen effort per unit, used by the queue engine. */
     prepLoadUnits: integer('prep_load_units').notNull().default(1),
+    /** Optional stock count: orders take from it and the item sells out at zero. */
+    trackStock: boolean('track_stock').notNull().default(false),
+    stockQty: integer('stock_qty').notNull().default(0),
+    /** Show "N left" to customers (otherwise the count is for the restaurant only). */
+    showStock: boolean('show_stock').notNull().default(false),
     version: integer('version').notNull().default(1),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('products_restaurant_idx').on(t.restaurantId), index('products_category_idx').on(t.categoryId)],
+  (t) => [
+    index('products_restaurant_idx').on(t.restaurantId),
+    index('products_category_idx').on(t.categoryId),
+    check('products_stock_non_negative', sql`${t.stockQty} >= 0`),
+  ],
 );
 
 export const productVariants = pgTable(
@@ -409,6 +427,11 @@ export const customers = pgTable('customers', {
   name: text('name').notNull(),
   ordersCount: integer('orders_count').notNull().default(0),
   lastOrderAt: ts('last_order_at'),
+  /** Orders the customer never collected (marked by staff when cancelling). */
+  noShowCount: integer('no_show_count').notNull().default(0),
+  /** Blocked by the platform: this phone cannot place online orders. */
+  isBlocked: boolean('is_blocked').notNull().default(false),
+  blockedReason: text('blocked_reason'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -450,6 +473,11 @@ export const orders = pgTable(
     /** Historical rows are never repriced when the platform switches to customer-funded fees. */
     pricingMode: pricingModeEnum('pricing_mode').notNull().default('LEGACY_COMMISSION'),
     platformFeeAmount: integer('platform_fee_amount').notNull().default(0),
+    /** Fixed platform fee shown to the customer as "service fee" (part of commission_amount). */
+    serviceFee: integer('service_fee').notNull().default(0),
+    /** Platform courier charge (part of commission_amount); included in delivery_fee when the customer pays it. */
+    platformDeliveryFee: integer('platform_delivery_fee').notNull().default(0),
+    platformDeliveryPayer: deliveryPayerEnum('platform_delivery_payer'),
     commissionBps: integer('commission_bps').notNull(),
     commissionAmount: integer('commission_amount').notNull(),
     merchantNet: integer('merchant_net').notNull(),
@@ -653,6 +681,85 @@ export const courierCashEntries = pgTable(
     check('courier_cash_entries_positive_amount', sql`${t.amount} > 0`),
     check('courier_cash_entries_kind_valid', sql`(${t.entryKind} = 'HAND_IN' and ${t.reversesEntryId} is null) or (${t.entryKind} = 'REVERSAL' and ${t.reversesEntryId} is not null)`),
   ],
+);
+
+/** One review per finished order: overall stars for the restaurant plus optional stars per item. */
+export const reviews = pgTable(
+  'reviews',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    restaurantId: uuid('restaurant_id').notNull().references(() => restaurants.id, { onDelete: 'cascade' }),
+    orderId: uuid('order_id').notNull().unique().references(() => orders.id, { onDelete: 'cascade' }),
+    rating: integer('rating').notNull(),
+    comment: text('comment'),
+    customerName: text('customer_name').notNull(),
+    /** Hidden by moderation (abusive / irrelevant); excluded from averages. */
+    isHidden: boolean('is_hidden').notNull().default(false),
+    reply: text('reply'),
+    repliedAt: ts('replied_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('reviews_restaurant_created_idx').on(t.restaurantId, t.createdAt),
+    check('reviews_rating_range', sql`${t.rating} between 1 and 5`),
+  ],
+);
+
+export const reviewItems = pgTable(
+  'review_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    reviewId: uuid('review_id').notNull().references(() => reviews.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+    rating: integer('rating').notNull(),
+  },
+  (t) => [
+    unique('review_items_uq').on(t.reviewId, t.productId),
+    index('review_items_product_idx').on(t.productId),
+    check('review_items_rating_range', sql`${t.rating} between 1 and 5`),
+  ],
+);
+
+/**
+ * Customer support: a complaint / question with a message thread. The customer holds an unguessable
+ * token (like order tracking). Order-related tickets are visible to that restaurant; all to the platform.
+ */
+export const supportTickets = pgTable(
+  'support_tickets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    code: text('code').notNull().unique(),
+    token: text('token').notNull().unique(),
+    restaurantId: uuid('restaurant_id').references(() => restaurants.id, { onDelete: 'set null' }),
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    category: ticketCategoryEnum('category').notNull(),
+    status: ticketStatusEnum('status').notNull().default('OPEN'),
+    customerName: text('customer_name').notNull(),
+    customerPhone: text('customer_phone'),
+    subject: text('subject').notNull(),
+    lastMessageAt: ts('last_message_at').notNull().defaultNow(),
+    closedAt: ts('closed_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('support_tickets_restaurant_status_idx').on(t.restaurantId, t.status),
+    index('support_tickets_status_last_idx').on(t.status, t.lastMessageAt),
+  ],
+);
+
+export const supportMessages = pgTable(
+  'support_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ticketId: uuid('ticket_id').notNull().references(() => supportTickets.id, { onDelete: 'cascade' }),
+    authorType: actorTypeEnum('author_type').notNull(),
+    authorUserId: uuid('author_user_id').references(() => users.id, { onDelete: 'set null' }),
+    authorName: text('author_name'),
+    body: text('body').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('support_messages_ticket_idx').on(t.ticketId, t.createdAt)],
 );
 
 /** Images uploaded by restaurants (product photos). Small, compressed on the phone before upload. */

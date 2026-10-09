@@ -51,7 +51,8 @@ export async function SiteFooter({ locale, className = '' }: { locale: Locale; c
     {
       title: t('المساعدة', 'Help'),
       links: [
-        ...(wa ? [{ href: wa, label: t('تواصل معنا', 'Contact us'), external: true }] : []),
+        { href: '/support', label: t('الدعم والشكاوى', 'Support & complaints') },
+        ...(wa ? [{ href: wa, label: t('واتساب', 'WhatsApp'), external: true }] : []),
         { href: '/legal/refunds', label: t('الإلغاء والاسترجاع', 'Cancellations & refunds') },
       ],
     },

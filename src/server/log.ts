@@ -38,4 +38,29 @@ export function reportError(err: unknown, context: Record<string, unknown> = {})
   } catch {
     /* never let reporting break a request */
   }
+  void sendAlert(`${err instanceof Error ? err.name : 'Error'}: ${err instanceof Error ? err.message : String(err)}`, context);
+}
+
+const lastAlert = new Map<string, number>();
+
+/**
+ * Instant alert to a chat webhook (ALERT_WEBHOOK_URL: Slack / Discord / Telegram sendMessage URL).
+ * At most one alert per distinct message per 5 minutes per server instance; never includes request
+ * bodies, and connection strings / tokens are redacted.
+ */
+export async function sendAlert(message: string, context: Record<string, unknown> = {}) {
+  const url = process.env.ALERT_WEBHOOK_URL;
+  if (!url) return;
+  const clean = message.replace(/postgres(?:ql)?:\/\/\S+/gi, 'postgres://[redacted]').replace(/(token|secret|password)=\S+/gi, '$1=[redacted]').slice(0, 300);
+  const key = clean.slice(0, 120);
+  const now = Date.now();
+  if (now - (lastAlert.get(key) ?? 0) < 5 * 60_000) return;
+  lastAlert.set(key, now);
+  const where = typeof context.where === 'string' ? context.where : typeof context.path === 'string' ? context.path : '';
+  const text = `🚨 ${process.env.VERCEL_ENV ?? 'local'}${where ? ` · ${where}` : ''}\n${clean}`;
+  try {
+    await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, content: text }), signal: AbortSignal.timeout(3000) });
+  } catch {
+    /* alerting is best effort */
+  }
 }

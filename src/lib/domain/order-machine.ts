@@ -85,7 +85,8 @@ export const TRANSITIONS: Record<OrderAction, TransitionDef> = {
     from: ['CREATED', 'AWAITING_PAYMENT', 'PAYMENT_REVIEW', 'CONFIRMED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE'],
     to: 'CANCELLED',
     permission: 'orders.cancel',
-    customerFrom: ['CREATED', 'AWAITING_PAYMENT'],
+    // CONFIRMED: only a cash order, within a short grace window (enforced by the order service).
+    customerFrom: ['CREATED', 'AWAITING_PAYMENT', 'CONFIRMED'],
     systemAllowed: true,
   },
 };

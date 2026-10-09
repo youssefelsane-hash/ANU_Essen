@@ -2,7 +2,7 @@ import { asc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { addonGroups, addons, categories, products, productVariants } from '@/server/db/schema';
 import { merchantContext } from '@/server/merchant-context';
-import { setAddonAvailability, setProductAvailability, setVariantAvailability, updatePriceAction } from '@/server/actions/merchant';
+import { setAddonAvailability, setProductAvailability, setStockAction, setVariantAvailability, updatePriceAction } from '@/server/actions/merchant';
 import { ActionForm, SubmitButton } from '@/components/forms';
 import { formatMoney } from '@/lib/domain/misc';
 import { getLocale } from '@/lib/i18n/server';
@@ -57,8 +57,16 @@ export default async function MerchantMenuPage() {
                     <div>
                       <div className="font-semibold">{localizedName(locale, p.nameAr, p.nameEn)}</div>
                       <div className="text-xs text-gray-500">{vs.length ? t(`${vs.length} أحجام`, `${vs.length} sizes`) : formatMoney(p.basePrice, locale)}</div>
+                      {p.trackStock && <div className={`mt-1 text-xs font-bold ${p.stockQty > 0 ? 'text-emerald-700' : 'text-red-700'}`}>{p.stockQty > 0 ? t(`متبقي ${p.stockQty}`, `${p.stockQty} left`) : t('الكمية خلصت — الصنف مقفول للعملاء', 'Sold out — hidden from ordering')}</div>}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {canToggle && p.trackStock && (
+                        <ActionForm action={setStockAction} className="flex items-center gap-1">
+                          <input type="hidden" name="productId" value={p.id} />
+                          <input name="stockQty" type="number" min="0" max="100000" inputMode="numeric" defaultValue={p.stockQty} className="input w-20 py-1" aria-label={t('الكمية المتاحة', 'Quantity available')} />
+                          <SubmitButton className="btn btn-secondary btn-sm">{t('حفظ الكمية', 'Save qty')}</SubmitButton>
+                        </ActionForm>
+                      )}
                       {canPrice && vs.length === 0 && <PriceEditor kind="product" id={p.id} price={p.basePrice} locale={locale} />}
                       {canToggle && <AvailabilityToggle on={p.isAvailable} action={setProductAvailability.bind(null, p.id, !p.isAvailable)} label={localizedName(locale, p.nameAr, p.nameEn)} />}
                     </div>

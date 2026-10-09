@@ -43,6 +43,9 @@ export interface MenuProduct {
   prepLoadUnits: number;
   variants: MenuVariant[];
   addonGroupIds: string[];
+  /** Optional stock: when tracked, an order may not take more than what is left. */
+  trackStock?: boolean;
+  stockQty?: number;
 }
 
 export interface PromotionRule {
@@ -96,10 +99,18 @@ export interface PricedLine {
 
 export type PromoErrorCode = 'INVALID_CODE' | 'NOT_STARTED' | 'EXPIRED' | 'MIN_SUBTOTAL' | 'USAGE_LIMIT' | 'NOT_APPLICABLE';
 
+export type DeliveryPayer = 'CUSTOMER' | 'RESTAURANT';
+
 export interface PricedCart {
   pricingMode: PricingMode;
+  /** Percentage part of the online platform fee (blended into the published food prices). */
   platformFeeAmount: number;
   platformFeeBps: number;
+  /** Fixed platform fee per online order, shown to the customer as a "service fee" row. */
+  serviceFee: number;
+  /** Platform courier charge; already inside deliveryFee when the customer pays it. */
+  platformDeliveryFee: number;
+  platformDeliveryPayer: DeliveryPayer | null;
   lines: PricedLine[];
   subtotal: number;
   discount: number;
@@ -126,7 +137,8 @@ export type PricingErrorCode =
   | 'ADDON_UNAVAILABLE'
   | 'ADDON_LIMIT'
   | 'ADDON_REQUIRED'
-  | 'QUANTITY_INVALID';
+  | 'QUANTITY_INVALID'
+  | 'STOCK_LIMIT';
 
 export class PricingError extends Error {
   constructor(
@@ -150,6 +162,11 @@ export interface PricingContext {
   deliveryFee: number;
   minOrderAmount: number;
   commissionBps: number;
+  /** Fixed online platform fee (piasters). */
+  serviceFee?: number;
+  /** Platform courier charge for this order (0 for pickup / not configured). */
+  platformDeliveryFee?: number;
+  platformDeliveryPayer?: DeliveryPayer;
 }
 
 export const MAX_LINE_QUANTITY = 50;
@@ -292,6 +309,16 @@ export function commissionFor(subtotal: number, discount: number, commissionBps:
 export function priceCart(input: readonly CartLineInput[], ctx: PricingContext): PricedCart {
   if (input.length === 0) throw new PricingError('EMPTY_CART', 'السلة فاضية');
   const lines = input.map((l) => priceLine(l, ctx));
+  // Stock is per product (all sizes share it), so add up every line of the same product.
+  const wanted = new Map<string, number>();
+  for (const l of lines) wanted.set(l.productId, (wanted.get(l.productId) ?? 0) + l.quantity);
+  for (const [productId, quantity] of wanted) {
+    const product = ctx.products.get(productId);
+    if (product?.trackStock && quantity > (product.stockQty ?? 0)) {
+      const left = Math.max(0, product.stockQty ?? 0);
+      throw new PricingError(left ? 'STOCK_LIMIT' : 'PRODUCT_UNAVAILABLE', left ? `متبقي ${left} بس من ${product.nameAr}` : `${product.nameAr} غير متاح حاليًا`, { productId, left });
+    }
+  }
   const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
   const loadUnits = lines.reduce((s, l) => s + l.loadUnitsPerUnit * l.quantity, 0);
 
@@ -323,21 +350,31 @@ export function priceCart(input: readonly CartLineInput[], ctx: PricingContext):
   const discount = best?.discount ?? 0;
   const pricingMode = ctx.pricingMode ?? 'LEGACY_COMMISSION';
   const commissionBps = pricingMode === 'COUNTER_NO_FEE' ? 0 : ctx.commissionBps;
-  const commissionAmount = commissionFor(subtotal, discount, commissionBps);
+  const percentCommission = commissionFor(subtotal, discount, commissionBps);
   // The online fee is calculated once on discounted food + extras, never on delivery.
-  const platformFeeAmount = pricingMode === 'ONLINE_PLATFORM_FEE' ? commissionAmount : 0;
-  const total = subtotal - discount + ctx.deliveryFee + platformFeeAmount;
+  const platformFeeAmount = pricingMode === 'ONLINE_PLATFORM_FEE' ? percentCommission : 0;
+  const serviceFee = pricingMode === 'ONLINE_PLATFORM_FEE' ? Math.max(0, ctx.serviceFee ?? 0) : 0;
+  // Platform couriers: the charge is either added to the bill or taken from the restaurant's share.
+  const platformDeliveryFee = Math.max(0, ctx.platformDeliveryFee ?? 0);
+  const platformDeliveryPayer = platformDeliveryFee > 0 ? (ctx.platformDeliveryPayer ?? 'CUSTOMER') : null;
+  const deliveryFee = ctx.deliveryFee + (platformDeliveryPayer === 'CUSTOMER' ? platformDeliveryFee : 0);
+  const total = subtotal - discount + deliveryFee + platformFeeAmount + serviceFee;
+  // Everything the platform is owed for this order: percentage + fixed fee + courier charge.
+  const commissionAmount = percentCommission + serviceFee + platformDeliveryFee;
 
   return {
     pricingMode,
     platformFeeAmount,
     platformFeeBps: pricingMode === 'ONLINE_PLATFORM_FEE' ? commissionBps : 0,
+    serviceFee,
+    platformDeliveryFee,
+    platformDeliveryPayer,
     lines,
     subtotal,
     discount,
     promotion: best ? { id: best.promo.id, name: best.promo.name, code: best.promo.code } : null,
     promoError,
-    deliveryFee: ctx.deliveryFee,
+    deliveryFee,
     total,
     loadUnits,
     minOrderAmount: ctx.minOrderAmount,

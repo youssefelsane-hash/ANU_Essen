@@ -52,6 +52,26 @@ export async function setProductAvailability(productId: string, available: boole
   revalidatePath(`/admin/restaurants/${p.restaurantId}/menu`);
 }
 
+/** Restock / correct the count of a tracked product from the quick availability screen. */
+export async function setStockAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  return runAction(async () => {
+    const productId = z.uuid().parse(str(fd, 'productId'));
+    const qty = z.number().int().min(0).max(100_000).parse(Number(str(fd, 'stockQty')));
+    const p = await productScope(productId);
+    const auth = await requirePermission('menu.availability', p.restaurantId);
+    await db().update(products).set({ stockQty: qty, updatedAt: new Date() }).where(eq(products.id, productId));
+    await audit({
+      actor: { type: 'USER', userId: auth.user.id, label: auth.user.name },
+      action: 'menu.stock_set', entity: 'product', entityId: productId, restaurantId: p.restaurantId,
+      before: { stockQty: p.stockQty }, after: { stockQty: qty },
+      ...(await requestMeta()),
+    });
+    revalidatePath('/merchant/menu');
+    revalidatePath('/merchant/menu/manage');
+    return 'تم تحديث الكمية';
+  });
+}
+
 export async function setVariantAvailability(variantId: string, available: boolean) {
   const [v] = await db().select().from(productVariants).where(eq(productVariants.id, variantId));
   if (!v) throw new AppError('NOT_FOUND');

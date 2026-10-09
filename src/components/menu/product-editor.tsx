@@ -34,10 +34,10 @@ export async function ProductEditor({ restaurantId, productId, basePath, surface
           <input type="hidden" name="restaurantId" value={restaurantId} />
           <input type="hidden" name="id" value={p?.id ?? ''} />
           <input type="hidden" name="surface" value={surface} />
-          <div><label className="label" htmlFor="product-name-ar">{t('الاسم بالعربي', 'Name (Arabic)')}</label><input id="product-name-ar" name="nameAr" defaultValue={p?.nameAr} className="input" dir="rtl" required maxLength={80} /></div>
-          <div><label className="label" htmlFor="product-name-en">{t('الاسم بالإنجليزي', 'Name (English)')}</label><input id="product-name-en" name="nameEn" dir="ltr" defaultValue={p?.nameEn} className="input" required maxLength={80} /></div>
-          <div><label className="label" htmlFor="product-description-ar">{t('الوصف بالعربي', 'Description (Arabic)')}</label><input id="product-description-ar" name="descriptionAr" defaultValue={p?.descriptionAr ?? ''} className="input" dir="rtl" maxLength={300} /></div>
-          <div><label className="label" htmlFor="product-description-en">{t('الوصف بالإنجليزي', 'Description (English)')}</label><input id="product-description-en" name="descriptionEn" dir="ltr" defaultValue={p?.descriptionEn ?? ''} className="input" maxLength={300} /></div>
+          <div><label className="label" htmlFor="product-name-ar">{t('الاسم بالعربي', 'Name (Arabic)')}</label><input id="product-name-ar" name="nameAr" defaultValue={p?.nameAr} className="input" dir="rtl" required maxLength={80} placeholder={t('مثلاً: ساندوتش شاورما فراخ', 'e.g. Chicken shawarma sandwich')} /></div>
+          <div><label className="label" htmlFor="product-name-en">{t('الاسم بالإنجليزي (اختياري)', 'Name (English, optional)')}</label><input id="product-name-en" name="nameEn" dir="ltr" defaultValue={p && p.nameEn !== p.nameAr ? p.nameEn : ''} className="input" maxLength={80} /></div>
+          <div><label className="label" htmlFor="product-description-ar">{t('وصف قصير (اختياري)', 'Short description (optional)')}</label><input id="product-description-ar" name="descriptionAr" defaultValue={p?.descriptionAr ?? ''} className="input" dir="rtl" maxLength={300} placeholder={t('مثلاً: فراخ متبلة + ثومية + بطاطس', 'e.g. marinated chicken, garlic sauce, fries')} /></div>
+          <div><label className="label" htmlFor="product-description-en">{t('الوصف بالإنجليزي (اختياري)', 'Description (English, optional)')}</label><input id="product-description-en" name="descriptionEn" dir="ltr" defaultValue={p?.descriptionEn ?? ''} className="input" maxLength={300} /></div>
           <div>
             <label className="label" htmlFor="product-category">{t('القسم', 'Category')}</label>
             <select id="product-category" name="categoryId" defaultValue={p?.categoryId ?? cats[0].id} className="input">
@@ -50,14 +50,26 @@ export async function ProductEditor({ restaurantId, productId, basePath, surface
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="isAvailable" defaultChecked={p?.isAvailable ?? true} /> {t('متاح دلوقتي', 'Available now')}</label>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="isActive" defaultChecked={p?.isActive ?? true} /> {t('ظاهر في المنيو', 'Show on the menu')}</label>
           </div>
+          <details className="admin-details admin-form-section sm:col-span-2" open={p?.trackStock || undefined}>
+            <summary>{t('الكمية المتاحة (مخزون) — اختياري', 'Stock quantity — optional')}</summary>
+            <div className="space-y-3 pt-3">
+              <p className="text-xs text-gray-600">{t('فعّلها لو الصنف بيتعمل بكمية محدودة (مثلاً ٣٠ ساندوتش في اليوم). كل طلب بياخد من الكمية، والصنف بيقفل لوحده لما يخلص، والطلب الملغي بيرجّع الكمية.', 'Turn on for items made in limited batches (e.g. 30 sandwiches a day). Every order takes from it, the item closes by itself at zero, and a cancelled order puts it back.')}</p>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="trackStock" defaultChecked={p?.trackStock ?? false} /> {t('تتبّع الكمية للصنف ده', 'Track stock for this product')}</label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block"><span className="label">{t('الكمية الموجودة دلوقتي', 'Quantity available now')}</span><input name="stockQty" type="number" min="0" max="100000" inputMode="numeric" defaultValue={p?.stockQty ?? 0} className="input" /></label>
+                <label className="flex items-center gap-2 self-end pb-3 text-sm"><input type="checkbox" name="showStock" defaultChecked={p?.showStock ?? false} /> {t('اعرض الكمية المتبقية للعميل («متبقي ٣»)', 'Show customers what is left (“3 left”)')}</label>
+              </div>
+              <p className="text-xs text-gray-500">{t('لو مش معروضة للعميل، الكمية بتفضل معلومة ليك انت بس.', 'If not shown, the count stays for your team only.')}</p>
+            </div>
+          </details>
           <div className="sm:col-span-2">
-            <span className="label">{t('الأحجام والأسعار — اختياري (كل حجم بسعره)', 'Sizes — optional (each with its own price)')}</span>
+            <span className="label">{t('الأحجام — اختياري (مثلاً: عادي ٤٥ / كبير ٦٠). لو ضفت أحجام، سعر كل حجم بيحل محل السعر الأساسي.', 'Sizes — optional (e.g. Regular 45 / Large 60). With sizes, each size price replaces the base price.')}</span>
             <RowsEditor
               name="variants"
               addLabel={t('إضافة حجم', 'Add size')}
               columns={[
                 { key: 'nameAr', label: t('عربي', 'Arabic'), type: 'text', dir: 'rtl' },
-                { key: 'nameEn', label: t('إنجليزي', 'English'), type: 'text' },
+                { key: 'nameEn', label: t('إنجليزي (اختياري)', 'English (opt.)'), type: 'text' },
                 { key: 'price', label: t('السعر بالجنيه', 'Price EGP'), type: 'number', width: '100px' },
                 ...(canLoad ? [{ key: 'prepLoadUnits', label: t('جهد التحضير — اختياري', 'Load (opt.)'), type: 'number' as const, width: '90px' }] : []),
                 { key: 'isAvailable', label: t('متاح', 'On'), type: 'checkbox', width: '40px' },

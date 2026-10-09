@@ -9,6 +9,8 @@ import AxeBuilder from '@axe-core/playwright';
 const adminEmail = process.env.E2E_ADMIN_EMAIL || 'admin@example.com';
 const adminPassword = process.env.E2E_ADMIN_PASSWORD;
 const slug = process.env.E2E_RESTAURANT_SLUG || 'alrayez';
+// A fresh number per run: the platform limits how many open orders one phone may hold.
+const runPhone = (n: number) => `010${String(Date.now() + n).slice(-8)}`;
 test.skip(!adminPassword, 'Set E2E_ADMIN_PASSWORD for a local seeded demo database.');
 
 async function screenshot(page: Page, name: string, info: TestInfo) {
@@ -76,23 +78,25 @@ test('mobile cash checkout, customization, discount and full order lifecycle', a
   await page.getByRole('link', { name: /مراجعة الطلب/ }).filter({ visible: true }).click();
   await expect(page).toHaveURL(/\/checkout$/);
   await page.getByLabel('اسمك', { exact: true }).fill('تجربة الطلب');
-  await page.getByLabel(/رقم الموبايل/).fill('01012345678');
+  await page.getByLabel(/رقم الموبايل/).fill(runPhone(1));
   await page.getByRole('radio', { name: /كاش عند الاستلام/ }).check();
   await page.getByRole('button', { name: 'عندك كود خصم؟' }).click();
   await page.getByRole('textbox', { name: 'كود الخصم' }).fill('WELCOME10');
   await page.getByRole('button', { name: 'تطبيق', exact: true }).click();
-  await expect(page.locator('.checkout-grand-total')).toContainText('153');
+  // 2 × (large + extra garlic) − WELCOME10 = 153, plus the seeded 5% online platform fee (7.65).
+  await expect(page.locator('.checkout-grand-total')).toContainText('160.65');
   await screenshot(page, 'checkout-mobile.png', info);
   await accessible(page);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await screenshot(page, 'checkout-desktop.png', info);
   await page.getByRole('button', { name: /تأكيد الطلب/ }).filter({ visible: true }).click();
   await expect(page).toHaveURL(/\/order\//);
-  await expect(page.getByRole('heading', { name: 'في انتظار تأكيد المطعم' })).toBeVisible();
+  // Cash goes straight into the kitchen (no "waiting for the restaurant" step).
+  await expect(page.getByRole('heading', { name: 'المطعم أكد طلبك' })).toBeVisible();
   const trackingURL = page.url();
   const token = trackingURL.split('/order/')[1];
   const data = await (await page.request.get(`/api/public/orders/${token}`)).json();
-  expect(data.order.total).toBe(15300);
+  expect(data.order.total).toBe(16065);
   expect(data.order.items[0].quantity).toBe(2);
   expect(data.order.estimatedArrivalAt).toBeGreaterThan(data.order.createdAt);
   const menu = await (await page.request.get(`/api/public/stores/${slug}`)).json();
@@ -105,14 +109,13 @@ test('mobile cash checkout, customization, discount and full order lifecycle', a
   await staffPage.goto('/merchant');
   const orderCard = staffPage.getByRole('article').filter({ has: staffPage.getByText('#' + data.order.orderNumber, { exact: true }) });
   await expect(orderCard).toBeVisible();
-  await expect(orderCard.getByRole('button', { name: 'قبول الطلب', exact: true })).toBeVisible();
+  // The next step for an auto-accepted cash order is "ready"; printing stays under more options.
+  await expect(orderCard.getByRole('button', { name: 'الطلب جاهز ✓', exact: true })).toBeVisible();
   await expect(orderCard.getByRole('button', { name: '🖨️ طباعة', exact: true })).not.toBeVisible();
-  await orderCard.getByText('خيارات أخرى', { exact: true }).click();
+  await orderCard.getByText('طباعة وخيارات أخرى', { exact: true }).click();
   await expect(orderCard.getByRole('button', { name: '🖨️ طباعة', exact: true })).toBeVisible();
-  await orderCard.getByText('خيارات أخرى', { exact: true }).click();
-  await orderCard.getByRole('button', { name: 'قبول الطلب', exact: true }).click();
-  await expect(orderCard.getByRole('button', { name: 'ابدأ التحضير', exact: true })).toBeVisible();
-  await orderCard.getByRole('button', { name: 'ابدأ التحضير', exact: true }).click();
+  await orderCard.getByText('طباعة وخيارات أخرى', { exact: true }).click();
+  await transition(staff, menu.restaurant.id, data.order.id, 'START_PREPARING');
   // Optimistic cards update immediately; wait for the actual server state before
   // the remaining transitions are sent through the authenticated API.
   await expect.poll(async () => (await (await page.request.get(`/api/public/orders/${token}`)).json()).order.status).toBe('PREPARING');
@@ -143,7 +146,7 @@ test('InstaPay submission and reviewed payment advances to confirmed', async ({ 
   await page.getByRole('button', { name: 'إضافة وجبة شاورما للسلة' }).click();
   await page.getByRole('link', { name: /مراجعة الطلب/ }).filter({ visible: true }).click();
   await page.getByLabel('اسمك', { exact: true }).fill('تجربة التحويل');
-  await page.getByLabel(/رقم الموبايل/).fill('01012345679');
+  await page.getByLabel(/رقم الموبايل/).fill(runPhone(2));
   await page.getByRole('radio', { name: /إنستاباي/ }).check();
   const confirm = page.getByRole('button', { name: /تأكيد الطلب/ }).filter({ visible: true });
   await expect(confirm).toBeEnabled();

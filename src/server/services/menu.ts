@@ -16,9 +16,10 @@ import type { MenuAddonGroup, MenuProduct, PromotionRule } from '../../lib/domai
 import type { PublicMenu } from '../../lib/types';
 import { publishedFoodPrice } from '../../lib/domain/customer-pricing';
 import { getRestaurantBySlug, getStoreLive } from './store';
+import { MIN_RATINGS_SHOWN, productRatings, publicReviews, restaurantRatings, type RatingSummary } from './reviews';
 
 export interface MenuCatalog {
-  products: Map<string, MenuProduct & { categoryId: string; descriptionAr: string | null; descriptionEn: string | null; imageUrl: string | null; sortOrder: number }>;
+  products: Map<string, MenuProduct & { categoryId: string; descriptionAr: string | null; descriptionEn: string | null; imageUrl: string | null; sortOrder: number; showStock: boolean }>;
   addonGroups: Map<string, MenuAddonGroup & { sortOrder: number; isActive: boolean }>;
 }
 
@@ -77,6 +78,9 @@ export async function loadMenuCatalog(d: Db, restaurantId: string): Promise<Menu
       isActive: p.isActive,
       prepLoadUnits: p.prepLoadUnits,
       sortOrder: p.sortOrder,
+      trackStock: p.trackStock,
+      stockQty: p.stockQty,
+      showStock: p.showStock,
       variants: variantRows
         .filter((v) => v.productId === p.id)
         .map((v) => ({ id: v.id, nameAr: v.nameAr, nameEn: v.nameEn, price: v.price, isAvailable: v.isAvailable, prepLoadUnits: v.prepLoadUnits })),
@@ -116,7 +120,7 @@ export async function loadPublicMenu(d: Db, slug: string, options: { customerPri
   // A suspended restaurant still resolves (QR codes keep working) and shows a clear message instead of a 404.
   if (!r) return null;
 
-  const [catalog, categoryRows, bannerRows, methodRows, pointRows, live] = await Promise.all([
+  const [catalog, categoryRows, bannerRows, methodRows, pointRows, live, ratings, dishRatings, latestReviews] = await Promise.all([
     loadMenuCatalog(d, r.id),
     d.select().from(categories).where(and(eq(categories.restaurantId, r.id), eq(categories.isActive, true))).orderBy(asc(categories.sortOrder)),
     d
@@ -142,7 +146,11 @@ export async function loadPublicMenu(d: Db, slug: string, options: { customerPri
       .where(and(eq(deliveryPoints.restaurantId, r.id), eq(deliveryPoints.isActive, true)))
       .orderBy(asc(deliveryPoints.sortOrder)),
     getStoreLive(d, r, now),
+    restaurantRatings(d, [r.id]),
+    productRatings(d, r.id),
+    publicReviews(d, r.id),
   ]);
+  const shown = (x?: RatingSummary) => (x && x.count >= MIN_RATINGS_SHOWN ? x : null);
 
   const categoryIds = new Set(categoryRows.map((c) => c.id));
   const productsList = [...catalog.products.values()].filter((p) => categoryIds.has(p.categoryId));
@@ -162,7 +170,9 @@ export async function loadPublicMenu(d: Db, slug: string, options: { customerPri
       phone: r.phone,
       minOrderAmount: customerPrices ? publishedFoodPrice(r.minOrderAmount, r.commissionBps) : r.minOrderAmount,
       requirePhone: r.requirePhone,
+      rating: shown(ratings.get(r.id)),
     },
+    reviews: latestReviews.map((x) => ({ ...x, createdAt: x.createdAt.getTime() })),
     store: { status: live.status, reason: live.reason, etaMinutes: live.etaMinutes },
     categories: categoryRows.map((c) => ({ id: c.id, nameAr: c.nameAr, nameEn: c.nameEn })),
     products: productsList.map((p) => ({
@@ -174,7 +184,10 @@ export async function loadPublicMenu(d: Db, slug: string, options: { customerPri
       descriptionEn: p.descriptionEn,
       imageUrl: p.imageUrl,
       basePrice: customerPrices ? publishedFoodPrice(p.basePrice, r.commissionBps) : p.basePrice,
-      isAvailable: p.isAvailable,
+      isAvailable: p.isAvailable && (!p.trackStock || (p.stockQty ?? 0) > 0),
+      // The count is shown only when the restaurant chose to; otherwise it stays internal.
+      stockLeft: p.trackStock && p.showStock ? Math.max(0, p.stockQty ?? 0) : null,
+      rating: shown(dishRatings.get(p.id)),
       variants: p.variants.map((v, i) => ({ id: v.id, nameAr: v.nameAr, nameEn: v.nameEn, price: customerPrices ? publishedFoodPrice(v.price, r.commissionBps) : v.price, isAvailable: v.isAvailable, isDefault: i === 0 })),
       addonGroupIds: p.addonGroupIds,
     })),
@@ -188,6 +201,7 @@ export async function loadPublicMenu(d: Db, slug: string, options: { customerPri
     })),
     banners: bannerRows.map((b) => ({ id: b.id, titleAr: b.titleAr, titleEn: b.titleEn, subtitleAr: b.subtitleAr, subtitleEn: b.subtitleEn, imageUrl: b.imageUrl, bgColor: b.bgColor, textColor: b.textColor })),
     paymentMethods: methodRows.map((m) => ({ method: m.method })),
-    deliveryPoints: pointRows.map((p) => ({ id: p.id, nameAr: p.nameAr, nameEn: p.nameEn, isDefault: p.isDefault, deliveryFee: p.kind === 'PICKUP' ? 0 : p.deliveryFee, kind: p.kind })),
+    // Shown fee = what the customer pays for delivery, including a platform courier charge they cover.
+    deliveryPoints: pointRows.map((p) => ({ id: p.id, nameAr: p.nameAr, nameEn: p.nameEn, isDefault: p.isDefault, deliveryFee: p.kind === 'PICKUP' ? 0 : p.deliveryFee + (r.platformDeliveryPayer === 'CUSTOMER' ? r.platformDeliveryFee : 0), kind: p.kind })),
   };
 }

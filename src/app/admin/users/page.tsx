@@ -5,9 +5,10 @@ import { asc, eq } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { restaurants, roles, userRoles, users } from '@/server/db/schema';
 import { adminPage } from '@/server/admin-guard';
-import { createUserAction, setUserActiveAction } from '@/server/actions/admin-platform';
+import { setUserActiveAction } from '@/server/actions/admin-platform';
+import { ALL_PERMISSIONS } from '@/lib/domain/permissions';
 import { pageAuth } from '@/server/auth/session';
-import { ActionForm, SubmitButton } from '@/components/forms';
+import { CreateUserForm } from '@/components/admin/create-user-form';
 import { Forbidden, PageTitle } from '@/components/admin/ui';
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +30,7 @@ export default async function UsersPage() {
   ]);
   return (
     <div className="space-y-6">
-      <PageTitle title={t("المستخدمون والفريق", "Users & staff")} />
+      <PageTitle title={t("المستخدمون والفريق", "Users & staff")} subtitle={t("كل الحسابات اللي بتدخل السيستم. «حظر» بيطلّع الشخص فورًا من كل الأجهزة.", "Every account that can sign in. “Block” signs the person out of every device immediately.")} />
       <section className="card overflow-x-auto">
         <table className="table">
           <thead><tr><th>{t("الاسم", "Name")}</th><th>{t("البريد المستخدم للدخول", "Email (sign-in)")}</th><th>{t("الأدوار", "Roles")}</th><th>{t("الحالة", "Status")}</th><th /></tr></thead>
@@ -53,21 +54,9 @@ export default async function UsersPage() {
         </table>
       </section>
       <section className="card">
-        <h2 className="mb-3 font-bold">{t("إضافة مستخدم", "Create user")}</h2>
-        <ActionForm action={createUserAction} resetOnSuccess className="grid gap-2 md:grid-cols-3">
-          <input aria-label={t("الاسم", "Name")} name="name" placeholder={t("الاسم", "Name")} className="input" required />
-          <input aria-label={t("البريد الإلكتروني", "Email")} name="email" type="email" placeholder={t("البريد الإلكتروني", "Email")} className="input" required />
-          <input aria-label={t("كلمة المرور", "Password")} name="password" type="password" placeholder={t("كلمة المرور — 8 أحرف على الأقل", "Password (min 8)")} className="input" autoComplete="new-password" required />
-          <select aria-label={t("الدور", "Role")} name="roleKey" className="input">
-            <option value="">{t("بدون دور", "— no role —")}</option>
-            {roleList.map((r) => <option key={r.id} value={r.key}>{roleLabel(r.key, locale, r.name)} ({r.scope === 'STORE' ? t('مطعم', 'Restaurant') : t('منصة', 'Platform')})</option>)}
-          </select>
-          <select aria-label={t("المطعم", "Restaurant")} name="restaurantId" className="input">
-            <option value="">{t("اختر مطعمًا لدور المطعم", "— restaurant (store roles) —")}</option>
-            {restaurantList.map((r) => <option key={r.id} value={r.id}>{r.nameEn}</option>)}
-          </select>
-          <SubmitButton>{t("إنشاء", "Create")}</SubmitButton>
-        </ActionForm>
+        <h2 className="mb-1 font-bold">{t("إضافة شخص", "Add a person")}</h2>
+        <p className="mb-3 text-sm text-gray-500">{t("لصاحب مطعم أو موظف منصة. موظفين المطعم العاديين صاحب المطعم يقدر يضيفهم بنفسه من شاشة المطعم.", "For a restaurant owner or a platform employee. Restaurant owners can add their own staff from their screen.")}</p>
+        <CreateUserForm roles={roleList.filter((r) => r.key !== 'SUPER_ADMIN' || ALL_PERMISSIONS.every((p) => me.platformPermissions.has(p))).map((r) => ({ key: r.key, label: roleLabel(r.key, locale, r.name), scope: r.scope }))} restaurants={restaurantList.map((r) => ({ id: r.id, name: r.nameEn }))} />
       </section>
     </div>
   );

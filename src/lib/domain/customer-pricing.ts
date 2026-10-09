@@ -14,6 +14,8 @@ export interface CustomerPriceTotals {
   subtotal: number;
   discount: number;
   deliveryFee: number;
+  /** Fixed platform fee, the one platform amount shown as its own row ("service fee"). */
+  serviceFee: number;
   total: number;
   /** The amount already blended into the published food subtotal. Server-only. */
   addedToFood: number;
@@ -31,13 +33,16 @@ export function customerPriceTotals(input: {
   total: number;
   platformFeeAmount?: number;
   platformFeeBps?: number;
+  serviceFee?: number;
 }): CustomerPriceTotals {
   const applies = input.pricingMode === 'ONLINE_PLATFORM_FEE';
+  const serviceFee = input.serviceFee ?? 0;
   if (!applies) {
     return {
       subtotal: input.subtotal,
       discount: input.discount,
       deliveryFee: input.deliveryFee,
+      serviceFee,
       total: input.total,
       addedToFood: 0,
     };
@@ -52,6 +57,7 @@ export function customerPriceTotals(input: {
     subtotal: input.subtotal + publishedAddition,
     discount: input.discount + publishedAddition - actual,
     deliveryFee: input.deliveryFee,
+    serviceFee,
     total: input.total,
     addedToFood: publishedAddition,
   };
@@ -103,6 +109,7 @@ export function redactOrderPricing(order: OrderSnapshot): OrderSnapshot {
     pricingMode,
     platformFeeAmount,
     platformFeeBps,
+    serviceFee: order.serviceFee,
     subtotal: order.subtotal,
     discount: order.discountTotal,
     deliveryFee: order.deliveryFee,

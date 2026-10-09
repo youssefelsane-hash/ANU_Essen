@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ShoppingBag } from 'lucide-react';
+import { ArrowLeft, LifeBuoy, ShoppingBag } from 'lucide-react';
 import { useLanguage } from '@/components/language-provider';
-import { MY_ORDERS_KEY, readJson, type SavedOrder } from '@/client/storage';
+import { MY_ORDERS_KEY, MY_TICKETS_KEY, readJson, type SavedOrder, type SavedTicket } from '@/client/storage';
 import { formatDateTime, formatMoney } from '@/lib/domain/misc';
 import { labels, localizedName } from '@/lib/i18n';
 import type { TrackingView } from '@/lib/types';
@@ -67,5 +67,26 @@ export function MyOrders() {
         );
       })}
     </ul>
+  );
+}
+
+/** Complaints opened from this phone (links only; the conversation loads on its own page). */
+export function MyTickets() {
+  const { t, locale } = useLanguage();
+  const [list, setList] = useState<SavedTicket[]>([]);
+  useEffect(() => {
+    const saved = readJson<SavedTicket[]>(MY_TICKETS_KEY, []);
+    setList(Array.isArray(saved) ? saved.filter((x) => x && /^[A-Za-z0-9_-]{16,64}$/.test(x.token)) : []);
+  }, []);
+  if (!list.length) return null;
+  return (
+    <section className="mt-10">
+      <h2 className="mb-3 text-xl font-bold">{t('الشكاوى والاستفسارات', 'Complaints & questions')}</h2>
+      <ul className="space-y-2">
+        {list.map((x) => (
+          <li key={x.token}><Link href={`/support/${x.token}`} className="flex items-center gap-3 rounded-2xl border border-stone-200 bg-white p-3 hover:border-stone-400"><LifeBuoy size={18} /><span className="flex-1"><b dir="ltr">{x.code}</b> <small className="text-stone-500">· {formatDateTime(x.createdAt, 'Africa/Cairo', locale)}</small></span><ArrowLeft size={16} className="directional-arrow text-stone-400" /></Link></li>
+        ))}
+      </ul>
+    </section>
   );
 }

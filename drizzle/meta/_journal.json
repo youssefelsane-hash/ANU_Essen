@@ -64,6 +64,13 @@
       "when": 1791483455954,
       "tag": "0008_courier_cash_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791572169196,
+      "tag": "0009_platform_ops",
+      "breakpoints": true
     }
   ]
 }
