@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { db, isUniqueViolation, type Db } from '../db';
 import {
   customers,
@@ -9,13 +9,15 @@ import {
   orderItems,
   orders,
   payments,
+  products,
   promotions,
   promotionUsages,
   restaurantPaymentMethods,
   storeCounters,
 } from '../db/schema';
 import { AppError } from '../errors';
-import { initialStatusFor, type OrderChannel, type OrderStatus, type PaymentMethod } from '../../lib/domain/order-machine';
+import { ACTIVE_STATUSES, initialStatusFor, type OrderChannel, type OrderStatus, type PaymentMethod } from '../../lib/domain/order-machine';
+import { getRiskPolicy } from './risk';
 import { egp, priceCart, type PricedCart, type PricingMode } from '../../lib/domain/pricing';
 import { formatOrderNumber, normalizeEgyptianPhone } from '../../lib/domain/misc';
 import { acceptsOrders } from '../../lib/domain/store-status';
@@ -52,6 +54,9 @@ async function priceFor(d: Db, r: RestaurantRow, input: { items: CreateOrderInpu
     deliveryFee: point.kind === 'PICKUP' ? 0 : point.deliveryFee,
     minOrderAmount: r.minOrderAmount,
     commissionBps: pricingMode === 'COUNTER_NO_FEE' ? 0 : r.commissionBps,
+    serviceFee: r.serviceFee,
+    platformDeliveryFee: point.kind === 'PICKUP' ? 0 : r.platformDeliveryFee,
+    platformDeliveryPayer: r.platformDeliveryPayer,
     pricingMode,
   });
   return { priced, point };
@@ -62,6 +67,7 @@ function toQuote(priced: PricedCart, etaMinutes: number): QuoteResponse {
     pricingMode: priced.pricingMode,
     platformFeeAmount: priced.platformFeeAmount,
     platformFeeBps: priced.platformFeeBps,
+    serviceFee: priced.serviceFee,
     lines: priced.lines.map((l) => ({
       productId: l.productId,
       variantId: l.variantId,
@@ -90,7 +96,7 @@ function toQuote(priced: PricedCart, etaMinutes: number): QuoteResponse {
 /**
  * Customer receipts use the published all-in food price. The accounting split
  * is deliberately absent from the public API and the displayed math remains
- * subtotal − discount + delivery = total.
+ * subtotal − discount + delivery + service fee = total.
  */
 export function toCustomerQuote(quote: QuoteResponse): CustomerQuoteResponse {
   const totals = customerPriceTotals({
@@ -101,6 +107,7 @@ export function toCustomerQuote(quote: QuoteResponse): CustomerQuoteResponse {
     total: quote.total,
     platformFeeAmount: quote.platformFeeAmount,
     platformFeeBps: quote.platformFeeBps,
+    serviceFee: quote.serviceFee,
   });
   const { pricingMode: _pricingMode, platformFeeAmount: _platformFeeAmount, platformFeeBps: _platformFeeBps, ...publicQuote } = quote;
   const rate = quote.pricingMode === 'ONLINE_PLATFORM_FEE' ? quote.platformFeeBps ?? 0 : 0;
@@ -264,18 +271,23 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
       }
       const pricingMode: PricingMode = isCounter ? 'COUNTER_NO_FEE' : 'ONLINE_PLATFORM_FEE';
       const { priced, point } = await priceFor(tx, currentRestaurant, input, now, pricingMode);
-      // Cash enters the kitchen immediately, so reserve its real load under the same store lock.
-      // A 5-unit kitchen accepts a fifth unit but never a simultaneous sixth one.
+      // Every order claims its load under the same store lock: cash enters the kitchen now, InstaPay
+      // holds its place until paid (or the unpaid timeout releases it). A 5-unit kitchen accepts a
+      // fifth unit but never a simultaneous sixth one, whatever the payment method.
       const cfg = currentLive.config;
-      if (autoAcceptCash && cfg.autoPause && (
-        (cfg.maxAcceptedLoad > 0 && currentLive.load + priced.loadUnits > cfg.maxAcceptedLoad) ||
-        (cfg.maxActiveOrders > 0 && currentLive.activeOrders + 1 > cfg.maxActiveOrders)
+      const claimedLoad = currentLive.load + currentLive.reservedLoad;
+      const claimedOrders = currentLive.activeOrders + currentLive.reservedOrders;
+      if (cfg.autoPause && (
+        (cfg.maxAcceptedLoad > 0 && claimedLoad + priced.loadUnits > cfg.maxAcceptedLoad) ||
+        (cfg.maxActiveOrders > 0 && claimedOrders + 1 > cfg.maxActiveOrders)
       )) throw new AppError('STORE_PAUSED', closedMessage('PAUSED', 'CAPACITY'));
+      if (!isCounter && phone) await enforcePhonePolicy(tx, phone, input.paymentMethod);
       if (input.promoCode && priced.promoError) throw new AppError('PROMO_INVALID', priced.promoError.message);
       if (!isCounter && priced.minOrderShortfall > 0) throw new AppError('MIN_ORDER', `الحد الأدنى للطلب ${egp(publishedFoodPrice(priced.minOrderAmount, priced.platformFeeBps))} ج.م`);
       // Admission is charged only for a new valid order, under the idempotency lock.
       // It commits with the order, so retries and rolled-back checkouts don't consume a phone allowance.
       if (opts.admit) await opts.admit(tx);
+      await takeStock(tx, priced, now);
       const provisionalEta = computeEta({ confirmedAt: now, activeLoad: currentLive.load, orderLoad: priced.loadUnits, config: currentLive.config, extraDeliveryMinutes: point.extraMinutes, pickup: point.kind === 'PICKUP' });
 
       const [counter] = await tx.update(storeCounters)
@@ -334,6 +346,9 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
           currency: currentRestaurant.currency,
           pricingMode: priced.pricingMode,
           platformFeeAmount: priced.platformFeeAmount,
+          serviceFee: priced.serviceFee,
+          platformDeliveryFee: priced.platformDeliveryFee,
+          platformDeliveryPayer: priced.platformDeliveryPayer,
           commissionBps: priced.commissionBps,
           commissionAmount: priced.commissionAmount,
           merchantNet: priced.merchantNet,
@@ -420,6 +435,48 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
       if (winner) return replay(winner, requestHash, opts);
     }
     throw err;
+  }
+}
+
+/**
+ * Guest checkout has no account, so the phone number carries the risk rules for online orders:
+ * blocked numbers can't order, numbers with repeated no-shows can't choose cash, and one number
+ * can't hold too many open orders at once across the platform.
+ */
+async function enforcePhonePolicy(tx: Db, phone: string, method: PaymentMethod) {
+  const [customer] = await tx.select().from(customers).where(eq(customers.phone, phone));
+  if (!customer) return;
+  if (customer.isBlocked) throw new AppError('FORBIDDEN', 'الرقم ده موقوف من الطلب أونلاين. تواصل مع الدعم.');
+  const policy = await getRiskPolicy(tx);
+  if (method === 'CASH' && policy.noShowCashLimit > 0 && customer.noShowCount >= policy.noShowCashLimit) {
+    throw new AppError('PAYMENT_METHOD_DISABLED', 'الدفع كاش مش متاح للرقم ده بسبب طلبات قبل كده ما اتستلمتش. ادفع بإنستاباي.');
+  }
+  if (policy.maxOpenOrdersPerPhone > 0) {
+    const [open] = await tx.select({ n: sql<number>`count(*)::int` }).from(orders)
+      .where(and(eq(orders.customerId, customer.id), eq(orders.channel, 'ONLINE'), inArray(orders.status, [...ACTIVE_STATUSES])));
+    if (Number(open?.n ?? 0) >= policy.maxOpenOrdersPerPhone) {
+      throw new AppError('RATE_LIMITED', 'عندك طلبات لسه مفتوحة على الرقم ده. استنى لما تستلمها وبعدين اطلب تاني.');
+    }
+  }
+}
+
+/**
+ * Tracked products give up what this order takes, under the store lock that serialises orders.
+ * Pricing already refused quantities above what is left; the guarded update is a last line of
+ * defence against a concurrent manual stock edit.
+ */
+async function takeStock(tx: Db, priced: PricedCart, now: Date) {
+  const wanted = new Map<string, number>();
+  for (const l of priced.lines) wanted.set(l.productId, (wanted.get(l.productId) ?? 0) + l.quantity);
+  const tracked = await tx.select({ id: products.id, nameAr: products.nameAr }).from(products)
+    .where(and(inArray(products.id, [...wanted.keys()]), eq(products.trackStock, true)));
+  for (const p of tracked) {
+    const qty = wanted.get(p.id)!;
+    const [left] = await tx.update(products)
+      .set({ stockQty: sql`${products.stockQty} - ${qty}`, updatedAt: now })
+      .where(and(eq(products.id, p.id), gte(products.stockQty, qty)))
+      .returning({ id: products.id });
+    if (!left) throw new AppError('CONFLICT', `${p.nameAr} خلص حالًا. حدّث السلة وجرّب تاني.`);
   }
 }
 

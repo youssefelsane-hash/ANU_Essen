@@ -42,6 +42,13 @@ export interface SavedOrder {
 }
 
 export const MY_ORDERS_KEY = 'my-orders:v1';
+/** Support tickets opened from this phone ({ token, code, createdAt }). */
+export const MY_TICKETS_KEY = 'my-tickets:v1';
+export interface SavedTicket { token: string; code: string; createdAt: number }
+export function rememberTicket(t: SavedTicket) {
+  const list = readJson<SavedTicket[]>(MY_TICKETS_KEY, []);
+  writeJson(MY_TICKETS_KEY, [t, ...(Array.isArray(list) ? list : []).filter((x) => x.token !== t.token)].slice(0, 10));
+}
 export const PROFILE_KEY = 'customer-profile:v1';
 
 /** Last payment method / pickup point per restaurant, preselected next time. */

@@ -102,14 +102,14 @@ export async function assignRole(d: Db, userId: string, roleKey: string, restaur
 /** Creates everything a new restaurant needs to take orders (counters, queue config, payment methods). */
 export async function bootstrapRestaurant(
   d: Db,
-  data: { slug: string; nameAr: string; nameEn: string; commissionBps?: number; phone?: string | null; badgeText?: string | null; badgeTextEn?: string | null; taglineAr?: string | null; taglineEn?: string | null; brandColor?: string; logoUrl?: string | null; coverImageUrl?: string | null },
+  data: { slug: string; nameAr: string; nameEn: string; commissionBps?: number; serviceFee?: number; phone?: string | null; badgeText?: string | null; badgeTextEn?: string | null; taglineAr?: string | null; taglineEn?: string | null; brandColor?: string; logoUrl?: string | null; coverImageUrl?: string | null },
   queue: QueueConfig = DEFAULT_QUEUE_CONFIG,
 ) {
   const brand = restaurantBrandSchema.parse(data);
   return d.transaction(async (tx) => {
     const [r] = await tx
       .insert(restaurants)
-      .values({ ...brand, slug: data.slug, commissionBps: data.commissionBps ?? 500, phone: data.phone ?? null })
+      .values({ ...brand, slug: data.slug, commissionBps: data.commissionBps ?? 500, serviceFee: data.serviceFee ?? 0, phone: data.phone ?? null })
       .returning();
     await tx.insert(storeCounters).values({ restaurantId: r.id });
     await tx.insert(queueConfigs).values({ restaurantId: r.id, config: queue });

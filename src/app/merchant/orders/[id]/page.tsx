@@ -21,7 +21,7 @@ export default async function MerchantOrderPage({ params }: { params: Promise<{ 
   return (
     <main className="mx-auto max-w-6xl space-y-3 p-4">
       <Link href={permissions.has('reports.view') ? '/merchant/dashboard' : '/merchant'} className="text-sm text-blue-700">{text(locale, '← رجوع', '← Back')}</Link>
-      <OrderDetail order={order} restaurantName={localizedName(locale, restaurant.nameAr, restaurant.nameEn)} timezone={restaurant.timezone} canPrint={permissions.has('receipts.print')} canRefund={permissions.has('payments.refund')} />
+      <OrderDetail order={order} restaurantName={localizedName(locale, restaurant.nameAr, restaurant.nameEn)} timezone={restaurant.timezone} canPrint={permissions.has('receipts.print')} canRefund={permissions.has('payments.refund')} canCancel={permissions.has('orders.cancel')} />
     </main>
   );
 }

@@ -39,6 +39,8 @@ export const roleLabel = (key: string, locale: Locale, fallback?: string) => ROL
 
 const PERMISSION_AR: Record<string, string> = { 'platform.restaurants': 'إدارة المطاعم وإعداداتها', 'platform.queue': 'ضبط أوقات التحضير والضغط', 'platform.finance': 'المبيعات والعمولات والتسويات', 'platform.users': 'الحسابات والصلاحيات', 'platform.audit': 'سجل التغييرات', 'platform.settings': 'إعدادات المنصة', 'orders.view': 'عرض الطلبات', 'orders.accept': 'قبول طلبات الكاش', 'orders.create': 'تسجيل طلبات من الكاشير', 'orders.kitchen': 'تحضير الطلب وتجهيزه', 'orders.delivery': 'توصيل الطلب وتسليمه', 'orders.cancel': 'إلغاء الطلبات', 'payments.verify': 'مراجعة التحويل وتأكيد الدفع', 'payments.refund': 'استرداد المبالغ وطلبات الاسترجاع', 'receipts.print': 'طباعة الفواتير', 'menu.availability': 'إظهار الأصناف المتاحة', 'menu.manage': 'تعديل المنيو والأسعار والعروض', 'store.status': 'فتح استقبال الطلبات أو إيقافه', 'store.profile': 'تعديل اسم وشكل المطعم', 'couriers.cash': 'استلام وتصحيح عهدة كاش المندوبين', 'staff.manage': 'إدارة فريق المطعم', 'reports.view': 'عرض المبيعات وسجل الطلبات', 'audit.view': 'عرض سجل تغييرات المطعم' };
 PERMISSION_AR['couriers.cash'] = 'مراجعة واستلام عهدة المندوبين';
+PERMISSION_AR['platform.support'] = 'الشكاوى والتقييمات وحظر العملاء (كل المطاعم)';
+PERMISSION_AR['support.manage'] = 'الرد على شكاوى وتقييمات المطعم';
 export const permissionLabel = (key: string, locale: Locale, fallback?: string) => locale === 'ar' ? PERMISSION_AR[key] || fallback || key : fallback || key;
 
 // Only UI/system messages belong here. Names, notes and merchant-entered reasons stay intact.
@@ -54,6 +56,17 @@ const MESSAGES: [string, string][] = [
   ['اكتب سبب الرفض عشان العميل يعرفه', 'Write the reason so the customer knows'], ['الطلب ده اتراجع بالفعل', 'This request was already handled'], ['اكتب سبب طلب الاسترجاع', 'Write why you want a refund'],
   ['الطلب ده مش متاح لطلب استرجاع', 'This order cannot be refunded from here — contact the restaurant'], ['طلب الاسترجاع موجود بالفعل وبيتراجع', 'Your refund request is already being reviewed'],
   ['تم تسجيل الاسترداد', 'Refund recorded'], ['تم رفض طلب الاسترجاع', 'Refund request declined'],
+  ['اسم رابط المنيو كلمة قصيرة بالإنجليزي زي al-raya، مش رابط صورة أو موقع', 'The menu link name is a short English word like al-raya, not an image or web address'],
+  ['راجع مبالغ رسوم المنصة والتوصيل (من 0 لـ 500 ج.م)', 'Check the platform fee and delivery amounts (0–500 EGP)'],
+  ['تم تحديث الكمية', 'Stock updated'],
+  ['المطعم بدأ في طلبك، مينفعش يتلغي من هنا. كلّم المطعم.', 'The restaurant has started your order, so it can’t be cancelled here. Please call the restaurant.'],
+  ['الرقم ده موقوف من الطلب أونلاين. تواصل مع الدعم.', 'This number can’t place online orders. Please contact support.'],
+  ['الدفع كاش مش متاح للرقم ده بسبب طلبات قبل كده ما اتستلمتش. ادفع بإنستاباي.', 'Cash isn’t available for this number because earlier orders weren’t collected. Please pay by InstaPay.'],
+  ['عندك طلبات لسه مفتوحة على الرقم ده. استنى لما تستلمها وبعدين اطلب تاني.', 'You still have open orders on this number. Collect them first, then order again.'],
+  ['تم تسجيل إن العميل ما استلمش', 'Recorded as not collected'], ['الخيار ده للطلبات الجاهزة اللي ما اتستلمتش بس', 'Only for ready orders that were not collected'],
+  ['تم إرسال الرد', 'Reply sent'], ['اكتب ردك', 'Write your reply'], ['اكتب المشكلة بالتفصيل شوية', 'Please describe the problem in a bit more detail'],
+  ['اكتب رقم موبايلك عشان نقدر نرد عليك', 'Enter your mobile number so we can reply'], ['التقييم متاح بعد استلام الطلب ولمدة أسبوع', 'You can rate an order for a week after receiving it'], ['الطلب ده اتقيّم قبل كده', 'This order was already rated'],
+  ['مينفعش تدّي صلاحيات انت نفسك مش عندك', 'You cannot grant permissions you do not have yourself'], ['الحساب ده عنده صلاحيات أعلى منك؛ صاحب المنصة بس اللي يعدّله', 'This account has more permissions than you; only the platform owner can change it'],
   ['تم الحفظ', 'Saved'], ['لا يوجد تغيير', 'Nothing changed'], ['حصل خطأ غير متوقع، حاول تاني', 'Unexpected error — please try again'],
   ['بيانات غير صحيحة', 'Please check the information and try again'], ['اكتب اسمك', 'Enter your name'], ['السلة فاضية', 'Your basket is empty'],
   ['اكتب البريد الإلكتروني وكلمة المرور', 'Enter your email and password'], ['محاولات كتير. جرّب تاني بعد 15 دقيقة', 'Too many attempts. Try again in 15 minutes'], ['البريد الإلكتروني أو كلمة المرور غير صحيحة', 'Incorrect email or password'], ['الحساب ده موقوف. كلّم صاحب المطعم أو إدارة المنصة.', 'This account is blocked. Contact the restaurant owner or platform administrator.'],

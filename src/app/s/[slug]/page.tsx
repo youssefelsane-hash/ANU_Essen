@@ -4,6 +4,7 @@ import { getLocale } from '@/lib/i18n/server';
 import { notFound } from 'next/navigation';
 import { db } from '@/server/db';
 import { loadPublicMenu } from '@/server/services/menu';
+import { memo } from '@/server/cache';
 import { StoreMenu } from '@/components/customer/store-menu';
 import { SiteFooter } from '@/components/site-footer';
 import { getPlatformProfile } from '@/server/platform-profile';
@@ -32,7 +33,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 }
 
 export default async function StorePage({ params }: { params: Promise<{ slug: string }> }) {
-  const [menu, profile, locale] = await Promise.all([loadPublicMenu(db(), (await params).slug), getPlatformProfile(), getLocale('customer')]);
+  const slug = (await params).slug;
+  const [menu, profile, locale] = await Promise.all([memo(`menu:${slug.toLowerCase()}`, 5_000, () => loadPublicMenu(db(), slug)), memo('platform-profile', 30_000, getPlatformProfile), getLocale('customer')]);
   if (!menu) notFound();
   return (
     <>

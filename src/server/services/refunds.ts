@@ -164,6 +164,8 @@ export async function rejectRefundRequest(input: { refundId: string; restaurantI
     if (!hasPermission(input.actor.auth, 'payments.refund', request.restaurantId)) throw new AppError('FORBIDDEN', 'ليس لديك صلاحية لهذا الإجراء');
     if (request.status !== 'REQUESTED') throw new AppError('CONFLICT', 'الطلب ده اتراجع بالفعل');
     await tx.update(refunds).set({ status: 'REJECTED', decisionNote: note, decidedByUserId: input.actor.userId, decidedAt: now, updatedAt: now }).where(eq(refunds.id, request.id));
+    // Customers poll by order version; make the decision visible.
+    await tx.update(orders).set({ version: sql`${orders.version} + 1`, updatedAt: now }).where(eq(orders.id, request.orderId));
     await tx.insert(orderEvents).values({
       restaurantId: request.restaurantId,
       orderId: request.orderId,
@@ -218,6 +220,7 @@ export async function requestRefundByCustomer(input: { token: string; reason: st
           updatedAt: now,
         })
         .returning({ id: refunds.id });
+      await tx.update(orders).set({ version: sql`${orders.version} + 1` }).where(eq(orders.id, order.id));
       await tx.insert(orderEvents).values({
         restaurantId: order.restaurantId,
         orderId: order.id,

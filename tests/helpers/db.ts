@@ -19,6 +19,9 @@ export async function setupTestDb() {
   const demo = await seedDemoRestaurant(d, { demoPassword: TEST_PASSWORD });
   const admin = await ensureUser(d, { email: 'admin@test.local', name: 'Admin', password: TEST_PASSWORD });
   await assignRole(d, admin.id, 'SUPER_ADMIN', null);
+  // Most suites reuse one phone for many orders; the phone policy has its own tests that turn it on.
+  await d.insert(schema.systemSettings).values({ key: 'risk.policy', value: { maxOpenOrdersPerPhone: 0, noShowCashLimit: 0 } })
+    .onConflictDoUpdate({ target: schema.systemSettings.key, set: { value: { maxOpenOrdersPerPhone: 0, noShowCashLimit: 0 } } });
   return { d, client, demo };
 }
 

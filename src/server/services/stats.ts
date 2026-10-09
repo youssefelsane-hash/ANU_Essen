@@ -110,7 +110,7 @@ export interface RestaurantFinance {
   nameEn: string;
   commissionBps: number;
   /** sales / commission / merchantNet are net of refunds. */
-  period: { completed: number; sales: number; refunds: number; discounts: number; commission: number; merchantNet: number };
+  period: { completed: number; sales: number; refunds: number; discounts: number; commission: number; merchantNet: number; serviceFees: number; deliveryFees: number };
   allTime: { sales: number; commission: number; paid: number; outstanding: number };
 }
 
@@ -129,6 +129,8 @@ export async function financeByRestaurant(d: Db, from: Date, to: Date): Promise<
         discounts: money(orders.discountTotal),
         commission: money(orders.commissionAmount),
         merchantNet: money(orders.merchantNet),
+        serviceFees: money(orders.serviceFee),
+        deliveryFees: money(orders.platformDeliveryFee),
       })
       .from(orders)
       .where(and(eq(orders.status, 'COMPLETED'), gte(orders.completedAt, from), lt(orders.completedAt, to)))
@@ -162,6 +164,8 @@ export async function financeByRestaurant(d: Db, from: Date, to: Date): Promise<
         discounts: Number(p?.discounts ?? 0),
         commission: Number(p?.commission ?? 0) - pr.commissionReversed,
         merchantNet: Number(p?.merchantNet ?? 0) - (pr.amount - pr.commissionReversed),
+        serviceFees: Number(p?.serviceFees ?? 0),
+        deliveryFees: Number(p?.deliveryFees ?? 0),
       },
       allTime: { sales: Number(a?.sales ?? 0) - ar.amount, commission, paid: paidAmount, outstanding: commission - paidAmount },
     };
@@ -273,4 +277,82 @@ export async function courierSummary(d: Db, restaurantId: string, from: Date, to
   // This report powers the restaurant dashboard; the platform share is kept
   // exclusively in platform-finance reports.
   return balances.map(({ platformShare: _platformShare, merchantShare: _merchantShare, ...balance }) => balance);
+}
+
+export interface DayCloseRow {
+  restaurantId: string;
+  nameAr: string;
+  nameEn: string;
+  ordersCreated: number;
+  completed: number;
+  cancelled: number;
+  noShows: number;
+  /** Completed in the day, by how the customer paid. */
+  cashSales: number;
+  instapaySales: number;
+  counterSales: number;
+  refunds: number;
+  /** InstaPay transfers still waiting for a staff check (right now). */
+  pendingTransfers: number;
+  /** Orders created in the day that are still not finished (right now). */
+  stillOpen: number;
+  /** Cash couriers still hold for this restaurant (whole ledger, right now). */
+  courierCashOutstanding: number;
+  /** Platform share of the day's completed orders, minus what refunds gave back. */
+  platformShare: number;
+}
+
+/**
+ * End-of-day close: one row per restaurant with what should be in the drawer / InstaPay account,
+ * what went back to customers, what couriers still hold and what the platform is owed.
+ * Internal: callers enforce the viewer's scope (one restaurant, or platform finance).
+ */
+export async function dailyClose(d: Db, from: Date, to: Date, restaurantId?: string): Promise<DayCloseRow[]> {
+  const scope = restaurantId ? [eq(orders.restaurantId, restaurantId)] : [];
+  const [list, created, done, refunded, live, couriers] = await Promise.all([
+    d.select({ id: restaurants.id, nameAr: restaurants.nameAr, nameEn: restaurants.nameEn }).from(restaurants)
+      .where(restaurantId ? eq(restaurants.id, restaurantId) : undefined).orderBy(asc(restaurants.nameAr)),
+    d.select({
+      restaurantId: orders.restaurantId,
+      n: sql<number>`count(*)::int`,
+      cancelled: sql<number>`count(*) filter (where ${orders.status} = 'CANCELLED')::int`,
+      noShows: sql<number>`count(*) filter (where ${orders.cancelReason} = 'العميل ما استلمش الطلب')::int`,
+      stillOpen: sql<number>`count(*) filter (where ${orders.status} not in ('COMPLETED', 'CANCELLED'))::int`,
+    }).from(orders).where(and(gte(orders.createdAt, from), lt(orders.createdAt, to), ...scope)).groupBy(orders.restaurantId),
+    d.select({
+      restaurantId: orders.restaurantId,
+      n: sql<number>`count(*)::int`,
+      cash: sql<number>`coalesce(sum(${orders.total}) filter (where ${orders.paymentMethod} = 'CASH'), 0)::float8`,
+      instapay: sql<number>`coalesce(sum(${orders.total}) filter (where ${orders.paymentMethod} = 'INSTAPAY'), 0)::float8`,
+      counter: sql<number>`coalesce(sum(${orders.total}) filter (where ${orders.channel} = 'COUNTER'), 0)::float8`,
+      platform: money(orders.commissionAmount),
+    }).from(orders).where(and(eq(orders.status, 'COMPLETED'), gte(orders.completedAt, from), lt(orders.completedAt, to), ...scope)).groupBy(orders.restaurantId),
+    // Money handed back that day (any order); only completed orders ever counted platform share.
+    d.select({
+      restaurantId: refunds.restaurantId,
+      amount: money(refunds.amount),
+      reversed: sql<number>`coalesce(sum(${refunds.commissionReversed}) filter (where ${orders.status} = 'COMPLETED'), 0)::float8`,
+    })
+      .from(refunds).innerJoin(orders, eq(orders.id, refunds.orderId))
+      .where(and(eq(refunds.status, 'COMPLETED'), gte(refunds.decidedAt, from), lt(refunds.decidedAt, to), ...(restaurantId ? [eq(refunds.restaurantId, restaurantId)] : [])))
+      .groupBy(refunds.restaurantId),
+    d.select({ restaurantId: orders.restaurantId, pending: sql<number>`count(*)::int` }).from(orders)
+      .where(and(eq(orders.status, 'PAYMENT_REVIEW'), ...scope)).groupBy(orders.restaurantId),
+    courierAccounting(d, restaurantId),
+  ]);
+  return list.map((r) => {
+    const c = created.find((x) => x.restaurantId === r.id);
+    const k = done.find((x) => x.restaurantId === r.id);
+    const f = refunded.find((x) => x.restaurantId === r.id);
+    return {
+      restaurantId: r.id, nameAr: r.nameAr, nameEn: r.nameEn,
+      ordersCreated: Number(c?.n ?? 0), completed: Number(k?.n ?? 0), cancelled: Number(c?.cancelled ?? 0), noShows: Number(c?.noShows ?? 0),
+      cashSales: Number(k?.cash ?? 0), instapaySales: Number(k?.instapay ?? 0), counterSales: Number(k?.counter ?? 0),
+      refunds: Number(f?.amount ?? 0),
+      pendingTransfers: Number(live.find((x) => x.restaurantId === r.id)?.pending ?? 0),
+      stillOpen: Number(c?.stillOpen ?? 0),
+      courierCashOutstanding: couriers.filter((x) => x.restaurantId === r.id).reduce((s, x) => s + Math.max(0, x.outstanding), 0),
+      platformShare: Number(k?.platform ?? 0) - Number(f?.reversed ?? 0),
+    };
+  });
 }

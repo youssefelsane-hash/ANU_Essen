@@ -18,7 +18,8 @@ export function clientIp(req: Request): string | null {
 
 export function json(data: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
-  headers.set('cache-control', 'no-store');
+  // Private by default; a route may opt into shared caching explicitly.
+  if (!headers.has('cache-control')) headers.set('cache-control', 'no-store');
   return Response.json(data, { ...init, headers });
 }
 

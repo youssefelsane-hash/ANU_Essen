@@ -4,5 +4,11 @@
     "fra1"
   ],
   "buildCommand": "npm run vercel-build",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/maintenance",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }

@@ -52,14 +52,14 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label={t("مبيعات الفترة (بعد المرتجعات)", "Sales after refunds (period)")} value={m(sum((r) => r.period.sales))} />
         <Stat label={t("مرتجعات الفترة", "Refunds (period)")} value={m(sum((r) => r.period.refunds))} />
-        <Stat label={t("حصة المنصة للفترة", "Platform earnings (period)")} value={m(sum((r) => r.period.commission))} />
+        <Stat label={t("حصة المنصة للفترة", "Platform earnings (period)")} value={m(sum((r) => r.period.commission))} hint={t(`منها رسوم ثابتة ${m(sum((r) => r.period.serviceFees))} وتوصيل ${m(sum((r) => r.period.deliveryFees))}`, `incl. fixed fees ${m(sum((r) => r.period.serviceFees))} and delivery ${m(sum((r) => r.period.deliveryFees))}`)} />
         <Stat label={t("إجمالي ما تم تحصيله", "Commission paid (all time)")} value={m(sum((r) => r.allTime.paid))} />
         <Stat label={t("عمولة مستحقة", "Commission outstanding")} value={m(sum((r) => r.allTime.outstanding))} />
       </div>
       <section className="card overflow-x-auto">
         <h2 className="mb-2 font-bold">{t("حسب المطعم", "By restaurant")}</h2>
         <table className="table">
-          <thead><tr><th>{t("المطعم", "Restaurant")}</th><th>{t("النسبة", "Rate")}</th><th>{t("تم التسليم", "Completed")}</th><th>{t("المبيعات", "Sales")}</th><th>{t("المرتجع", "Refunded")}</th><th>{t("الخصومات", "Discounts")}</th><th>{t("العمولة", "Commission")}</th><th>{t("صافي المطعم", "Merchant net")}</th><th>{t("إجمالي العمولة", "All-time commission")}</th><th>{t("تم تحصيله", "Paid")}</th><th>{t("المستحق", "Outstanding")}</th></tr></thead>
+          <thead><tr><th>{t("المطعم", "Restaurant")}</th><th>{t("النسبة", "Rate")}</th><th>{t("تم التسليم", "Completed")}</th><th>{t("المبيعات", "Sales")}</th><th>{t("المرتجع", "Refunded")}</th><th>{t("الخصومات", "Discounts")}</th><th>{t("حصة المنصة", "Platform share")}</th><th>{t("منها توصيل", "of which delivery")}</th><th>{t("صافي المطعم", "Merchant net")}</th><th>{t("إجمالي العمولة", "All-time commission")}</th><th>{t("تم تحصيله", "Paid")}</th><th>{t("المستحق", "Outstanding")}</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.restaurantId}>
@@ -70,6 +70,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
                 <td>{r.period.refunds ? m(r.period.refunds) : '—'}</td>
                 <td>{m(r.period.discounts)}</td>
                 <td className="font-semibold">{m(r.period.commission)}</td>
+                <td>{r.period.deliveryFees ? m(r.period.deliveryFees) : '—'}</td>
                 <td>{m(r.period.merchantNet)}</td>
                 <td>{m(r.allTime.commission)}</td>
                 <td>{m(r.allTime.paid)}</td>
@@ -78,7 +79,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
             ))}
           </tbody>
         </table>
-        <p className="mt-2 text-xs text-gray-500">{t("رسوم الأونلاين تُضاف فوق سعر المطعم بعد الخصم ولا تخصم منه. الطلبات القديمة تحتفظ بحساب عمولتها السابق. تُحتسب المبالغ بعد التسليم والاسترداد.", "Online fees are added above the restaurant price after discounts. Legacy orders retain their original commission. Totals account for completed orders and refunds.")}</p>
+        <p className="mt-2 text-xs text-gray-500">{t("حصة المنصة = النسبة + المبلغ الثابت + أجرة توصيل المنصة. الرسوم بتتضاف فوق سعر المطعم؛ وأجرة التوصيل يا إما على العميل يا إما مخصومة من المطعم حسب إعداده. الطلبات القديمة تحتفظ بحسابها. المبالغ بعد التسليم والاسترداد.", "Platform share = percentage + fixed fee + platform delivery charge. Fees are added above the restaurant price; the delivery charge is paid by the customer or deducted from the restaurant per its setting. Legacy orders keep their accounting. Totals are after completion and refunds.")}</p>
       </section>
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="card">

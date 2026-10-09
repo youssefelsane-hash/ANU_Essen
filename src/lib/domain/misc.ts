@@ -52,6 +52,11 @@ export function formatDateTime(date: Date | string | number, timeZone: string, l
   }).format(new Date(date));
 }
 
+/** A pasted web or image address is never a menu link name (e.g. an image URL in the slug field). */
+export function looksLikeUrl(input: string): boolean {
+  return /:\/\/|^www\.|\.(?:jpe?g|png|webp|gif)(?:$|[?#])/i.test(input.trim());
+}
+
 export function slugify(input: string): string {
   return input
     .toLowerCase()

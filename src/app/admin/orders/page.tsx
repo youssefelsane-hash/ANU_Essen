@@ -17,7 +17,7 @@ const PAGE = 50;
 export default async function AdminOrders({ searchParams }: { searchParams: Promise<{ restaurant?: string; status?: string; q?: string; page?: string }> }) {
   const locale = await getLocale();
   const t = (ar: string, en: string) => text(locale, ar, en);
-  if (!(await adminPage('/admin/orders', 'platform.restaurants'))) return <Forbidden />;
+  if (!(await adminPage('/admin/orders', ['platform.restaurants', 'orders.view']))) return <Forbidden />;
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
   const tz = await platformTimezone();

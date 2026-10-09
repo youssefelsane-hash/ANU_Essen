@@ -49,17 +49,30 @@ export async function getActiveLoad(d: Db, restaurantId: string, excludeOrderId?
   return { load: Number(row?.load ?? 0), count: Number(row?.count ?? 0) };
 }
 
-export async function getStoreLive(d: Db, r: RestaurantRow, now = new Date()): Promise<StoreLive & { config: QueueConfig }> {
-  const config = await getQueueConfig(d, r.id);
-  const { load, count } = await getActiveLoad(d, r.id);
+/**
+ * Load held by InstaPay orders still waiting for payment / review. They are not in the kitchen yet,
+ * but counting them for admission means a transfer verified later never pushes the kitchen past its
+ * limit. The unpaid timeout releases the hold.
+ */
+export async function getReservedLoad(d: Db, restaurantId: string): Promise<{ load: number; count: number }> {
+  const [row] = await d
+    .select({ load: sql<number>`coalesce(sum(${orders.loadUnits}), 0)::int`, count: sql<number>`count(*)::int` })
+    .from(orders)
+    .where(and(eq(orders.restaurantId, restaurantId), inArray(orders.status, ['AWAITING_PAYMENT', 'PAYMENT_REVIEW'])));
+  return { load: Number(row?.load ?? 0), count: Number(row?.count ?? 0) };
+}
+
+export async function getStoreLive(d: Db, r: RestaurantRow, now = new Date()): Promise<StoreLive & { config: QueueConfig; reservedLoad: number; reservedOrders: number }> {
+  const [config, { load, count }, reserved] = await Promise.all([getQueueConfig(d, r.id), getActiveLoad(d, r.id), getReservedLoad(d, r.id)]);
+  // Admission (open / busy / paused at capacity) sees kitchen load plus held InstaPay load.
   const { status, reason } = computeEffectiveStatus({
     isActive: r.isActive,
     orderingStatus: r.orderingStatus,
     openingHours: r.openingHours ?? null,
     timezone: r.timezone,
     now,
-    load,
-    activeOrders: count,
+    load: load + reserved.load,
+    activeOrders: count + reserved.count,
     queue: config,
   });
   return {
@@ -73,6 +86,8 @@ export async function getStoreLive(d: Db, r: RestaurantRow, now = new Date()): P
     maxLoad: config.maxAcceptedLoad,
     etaMinutes: estimateTotalMinutes(load, config),
     config,
+    reservedLoad: reserved.load,
+    reservedOrders: reserved.count,
   };
 }
 

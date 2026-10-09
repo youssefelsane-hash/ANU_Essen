@@ -64,7 +64,7 @@ export default async function RestaurantSettingsPage({ params }: { params: Promi
               <HoursEditor name="openingHours" initial={r.openingHours ?? null} />
             </div>
 </div></details>
-            <PlatformRateField basisPoints={r.commissionBps} />
+            <PlatformRateField basisPoints={r.commissionBps} serviceFee={r.serviceFee} deliveryFee={r.platformDeliveryFee} deliveryPayer={r.platformDeliveryPayer} />
             <details className="admin-details admin-form-section sm:col-span-2"><summary>{t('إعدادات إضافية', 'Other settings')}</summary><div className="grid gap-3 pt-3 sm:grid-cols-2">            <Field label={t("اسم رابط المنيو", "URL slug (/s/…)")}><input aria-label={t("اسم رابط المنيو", "Menu link name")} name="slug" dir="ltr" defaultValue={r.slug} maxLength={48} className="input" required /><p className="mt-1 text-[11px] text-gray-500">{t("تغيير الاسم هنا يغيّر الرابط المباشر؛ رمز الطلب المطبوع يظل يعمل.", "Changing this updates direct menu links. Permanent QR links keep working.")}</p></Field>
 
             <Field label={t("المنطقة الزمنية", "Timezone")}><input aria-label={t("المنطقة الزمنية", "Timezone")} name="timezone" dir="ltr" defaultValue={r.timezone} className="input" /></Field>

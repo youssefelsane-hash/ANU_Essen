@@ -13,6 +13,7 @@ export const PERMISSIONS = {
   'platform.users': { scope: 'PLATFORM', description: 'Manage all users, roles and permissions' },
   'platform.audit': { scope: 'PLATFORM', description: 'View all audit logs' },
   'platform.settings': { scope: 'PLATFORM', description: 'Edit system settings' },
+  'platform.support': { scope: 'PLATFORM', description: 'Answer every support ticket, moderate reviews and manage customer blocks' },
   // Store scoped.
   'orders.view': { scope: 'STORE', description: 'See all orders of the restaurant' },
   'orders.accept': { scope: 'STORE', description: 'Accept cash orders' },
@@ -31,6 +32,7 @@ export const PERMISSIONS = {
   'reports.view': { scope: 'STORE', description: 'See restaurant sales reports and order history' },
   'couriers.cash': { scope: 'STORE', description: 'Receive and correct courier cash hand-ins for this restaurant' },
   'audit.view': { scope: 'STORE', description: 'See audit logs of the restaurant' },
+  'support.manage': { scope: 'STORE', description: 'Answer customer complaints and reviews of the restaurant' },
 } as const satisfies Record<string, { scope: PermissionScope; description: string }>;
 
 export type Permission = keyof typeof PERMISSIONS;

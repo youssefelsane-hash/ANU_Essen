@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Store, ReceiptText, Wallet, Users, UserCog, ShieldCheck, ScrollText, Settings, ChefHat, ChevronDown, RotateCcw, QrCode, Bike } from 'lucide-react';
+import { LayoutDashboard, Store, ReceiptText, Wallet, Users, UserCog, ShieldCheck, ScrollText, Settings, ChefHat, ChevronDown, RotateCcw, QrCode, Bike, LifeBuoy, Star } from 'lucide-react';
 import { useLanguage } from '@/components/language-provider';
 
-const icons = { LayoutDashboard, Store, ReceiptText, Wallet, Users, UserCog, ShieldCheck, ScrollText, Settings, ChefHat, RotateCcw, QrCode, Bike };
+const icons = { LayoutDashboard, Store, ReceiptText, Wallet, Users, UserCog, ShieldCheck, ScrollText, Settings, ChefHat, RotateCcw, QrCode, Bike, LifeBuoy, Star };
 type Item = { href: string; ar: string; en: string; icon: keyof typeof icons; primary: boolean };
 export function AdminNavigation({ items }: { items: Item[] }) {
   const pathname = usePathname();

@@ -8,6 +8,7 @@ import { MerchantNavigation, MerchantSuspensionNotice } from '@/components/merch
 import { SafeSignOutForm } from '@/components/safe-sign-out';
 import { db } from '@/server/db';
 import { openRefundRequestCount } from '@/server/services/refunds';
+import { openTicketCount } from '@/server/services/support';
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale('staff');
@@ -34,7 +35,10 @@ export default async function MerchantLayout({ children }: { children: React.Rea
       </main>
     );
   }
-  const refundRequests = permissions.has('payments.refund') ? await openRefundRequestCount(db(), restaurant.id) : 0;
+  const [refundRequests, openTickets] = await Promise.all([
+    permissions.has('payments.refund') ? openRefundRequestCount(db(), restaurant.id) : 0,
+    permissions.has('support.manage') ? openTicketCount(db(), restaurant.id) : 0,
+  ]);
   const canDeliver = restaurants.some((store) => storePermissionsFor(auth, store.id).includes('orders.delivery'));
   const links = [
     { href: '/merchant/delivery', ar: 'طلبات التوصيل', en: 'Deliveries', show: canDeliver },
@@ -42,9 +46,11 @@ export default async function MerchantLayout({ children }: { children: React.Rea
     { href: '/merchant', ar: 'الطلبات', en: 'Orders', show: permissions.has('orders.view') || permissions.has('orders.delivery') },
     { href: '/merchant/new-order', ar: 'طلب من الكاشير', en: 'Counter order', show: permissions.has('orders.create') },
     { href: '/merchant/dashboard', ar: 'ملخص اليوم', en: 'Today', show: permissions.has('reports.view') },
+    { href: '/merchant/close', ar: 'إقفال اليوم', en: 'Close of day', show: permissions.has('reports.view') },
     { href: '/merchant/menu', ar: 'الأصناف والأسعار', en: 'Menu & prices', show: permissions.has('menu.availability') || permissions.has('menu.manage') },
     { href: '/merchant/appearance', ar: 'اسم وشكل المطعم', en: 'Restaurant appearance', show: permissions.has('store.profile') },
     { href: '/merchant/refunds', ar: 'الاسترداد', en: 'Refunds', show: permissions.has('payments.refund'), count: refundRequests },
+    { href: '/merchant/support', ar: 'الشكاوى والتقييمات', en: 'Complaints & ratings', show: permissions.has('support.manage'), count: openTickets },
     { href: '/merchant/staff', ar: 'الفريق', en: 'Team', show: permissions.has('staff.manage') },
   ];
   return (

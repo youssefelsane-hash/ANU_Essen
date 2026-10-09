@@ -4,9 +4,12 @@ import Link from 'next/link';
 import { desc, eq } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { orders, restaurants } from '@/server/db/schema';
-import { adminPage, platformTimezone } from '@/server/admin-guard';
+import { firstAdminSection, platformTimezone } from '@/server/admin-guard';
+import { pageAuth } from '@/server/auth/session';
+import { can } from '@/server/auth/authz';
+import { redirect } from 'next/navigation';
 import { activeCounts, financeByRestaurant, periodStats } from '@/server/services/stats';
-import { Forbidden, PageTitle, Stat } from '@/components/admin/ui';
+import { PageTitle, Stat } from '@/components/admin/ui';
 import { startOfLocalDay } from '@/lib/domain/hours';
 import { formatDateTime, formatMoney } from '@/lib/domain/misc';
 import { STATUS_TONE } from '@/lib/labels';
@@ -16,8 +19,9 @@ export const dynamic = 'force-dynamic';
 export default async function AdminOverview() {
   const locale = await getLocale();
   const t = (ar: string, en: string) => text(locale, ar, en);
-  const auth = await adminPage('/admin', 'platform.finance');
-  if (!auth) return <Forbidden />;
+  const auth = await pageAuth('/admin');
+  // Limited employees (e.g. support only) start on the first section they are allowed to use.
+  if (!can(auth, 'platform.finance')) redirect(firstAdminSection(auth));
   const tz = await platformTimezone();
   const from = startOfLocalDay(new Date(), tz);
   const to = new Date(from.getTime() + 24 * 3600_000);

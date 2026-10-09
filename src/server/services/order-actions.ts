@@ -1,7 +1,7 @@
 import { and, eq, lte, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import { db, isUniqueViolation } from '../db';
-import { deliveryPoints, orderEvents, orders, paymentAttachments, payments, restaurants, storeCounters, users } from '../db/schema';
+import { deliveryPoints, orderEvents, orderItems, orders, paymentAttachments, payments, products, restaurants, storeCounters, users } from '../db/schema';
 import { loadAuthz } from '../auth/authz';
 import { AppError } from '../errors';
 import { log } from '../log';
@@ -16,6 +16,7 @@ import {
 } from '../../lib/domain/order-machine';
 import { hasPermission, type AuthzSnapshot } from '../../lib/domain/permissions';
 import { computeEta } from '../../lib/domain/queue';
+import { CUSTOMER_CANCEL_GRACE_MINUTES } from '../../lib/domain/risk';
 import { audit } from './audit';
 import { getActiveLoad, getQueueConfig } from './store';
 
@@ -112,6 +113,14 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
       order.fulfillment);
       if (!permitted) throw new AppError('FORBIDDEN', 'Not allowed to perform this action');
 
+      // A customer may take back a cash order only moments after it was accepted, before cooking.
+      if (input.actor.type === 'CUSTOMER' && input.action === 'CANCEL' && order.status === 'CONFIRMED') {
+        const confirmedAt = order.confirmedAt?.getTime() ?? 0;
+        if (order.paymentMethod !== 'CASH' || order.channel !== 'ONLINE' || now.getTime() - confirmedAt > CUSTOMER_CANCEL_GRACE_MINUTES * 60_000) {
+          throw new AppError('FORBIDDEN', 'المطعم بدأ في طلبك، مينفعش يتلغي من هنا. كلّم المطعم.');
+        }
+      }
+
       if (input.action === 'SUBMIT_PAYMENT') {
         const [restaurant] = await tx.select({ timeout: restaurants.unpaidTimeoutMinutes }).from(restaurants).where(eq(restaurants.id, order.restaurantId));
         if (restaurant && restaurant.timeout > 0 && now.getTime() >= order.updatedAt.getTime() + restaurant.timeout * 60_000) {
@@ -199,6 +208,17 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
         .update(orders)
         .set({ ...patch, version: sql`${orders.version} + 1` })
         .where(eq(orders.id, order.id));
+
+      // A cancelled order gives its units back to tracked products.
+      if (next === 'CANCELLED') {
+        const items = await tx.select({ productId: orderItems.productId, quantity: orderItems.quantity }).from(orderItems).where(eq(orderItems.orderId, order.id));
+        const back = new Map<string, number>();
+        for (const it of items) if (it.productId) back.set(it.productId, (back.get(it.productId) ?? 0) + it.quantity);
+        for (const [productId, qty] of back) {
+          await tx.update(products).set({ stockQty: sql`${products.stockQty} + ${qty}`, updatedAt: now })
+            .where(and(eq(products.id, productId), eq(products.trackStock, true)));
+        }
+      }
 
       const paymentPatch: Partial<typeof payments.$inferInsert> = { updatedAt: now };
       if (newPaymentStatus) paymentPatch.status = newPaymentStatus;

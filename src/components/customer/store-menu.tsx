@@ -5,7 +5,7 @@ import { useLanguage } from '@/components/language-provider';
 import { LanguageSwitcher } from '@/components/language-switcher';
 import { labels, localizedName } from '@/lib/i18n';
 import { useRouter } from 'next/navigation';
-import { AlarmClock, ArrowLeft, Check, Clock3, MapPin, Minus, Plus, RotateCcw, Search, ShoppingBag, UtensilsCrossed, X } from 'lucide-react';
+import { AlarmClock, ArrowLeft, Check, Clock3, MapPin, Minus, Plus, RotateCcw, Search, ShoppingBag, Star, UtensilsCrossed, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { estimateLine, useCart } from '@/client/cart';
 import { lastOrderFor, MY_ORDERS_KEY, readJson, writeJson, type SavedOrder } from '@/client/storage';
@@ -53,6 +53,10 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
     const recent = readJson<SavedOrder[]>(MY_ORDERS_KEY, []).find((o) => o.slug === slug && Date.now() - o.createdAt < 3 * 3600_000);
     setActiveOrder(recent ?? null);
     setLastOrder(lastOrderFor(slug, new URLSearchParams(window.location.search).get('reorder')));
+    // Opened from the cross-restaurant search: show that dish straight away.
+    const wanted = new URLSearchParams(window.location.search).get('product');
+    const fromSearch = wanted ? initialMenu.products.find((p) => p.id === wanted) : undefined;
+    if (fromSearch) setSelected(fromSearch);
     const ctrl = new AbortController();
     const refresh = async () => {
       if (document.hidden || !navigator.onLine) return;
@@ -188,6 +192,7 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
             <div className="hero-content">
               <span className="hero-eyebrow"><span />{localizedName(locale, brand.badgeText, brand.badgeTextEn) || t("من المطبخ، لحد عندك", "From our kitchen to you")}</span>
               <h1>{localizedName(locale, menu.restaurant.nameAr, menu.restaurant.nameEn)}</h1>
+              {menu.restaurant.rating && <a href="#reviews" className="hero-rating"><Star size={15} fill="currentColor" aria-hidden="true" /><b>{menu.restaurant.rating.avg.toFixed(1)}</b><span>({menu.restaurant.rating.count} {t('تقييم', 'ratings')})</span></a>}
               <p>{localizedName(locale, brand.taglineAr, brand.taglineEn) || t("اختار اللي بتحبه. هنجهّز طلبك، وتتابعه معانا خطوة بخطوة.", "Choose what you love. We prepare it while you follow every step.")}</p>
               <a href="#menu" className="hero-link">{t("اكتشف المنيو ", "Explore the menu ")}<ArrowLeft className="directional-arrow" size={16} /></a>
             </div>
@@ -274,7 +279,9 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
                         </button>
                         <div className="product-info">
                           <button type="button" className="product-name-button" onClick={() => setSelected(product)}><h4>{localizedName(locale, product.nameAr, product.nameEn)}</h4></button>
+                          {product.rating && <span className="product-rating" aria-label={t(`تقييم ${product.rating.avg} من 5`, `Rated ${product.rating.avg} of 5`)}><Star size={12} fill="currentColor" aria-hidden="true" />{product.rating.avg.toFixed(1)} <small>({product.rating.count})</small></span>}
                           <p>{localizedName(locale, product.descriptionAr, product.descriptionEn) || t("حضّر طلبك بالطريقة اللي بتحبها.", "Make your meal just the way you like it.")}</p>
+                          {available && typeof product.stockLeft === 'number' && product.stockLeft <= 20 && <span className="product-stock-left">{t(`متبقي ${product.stockLeft} بس`, `Only ${product.stockLeft} left`)}</span>}
                           <div className="product-action-row">
                             <strong className="product-price">{product.variants.length > 1 && <small>{t("من ", "From ")}</small>}{formatMoney(minPrice, locale)}</strong>
                             {available && !suspended ? <button className="product-add-button" onClick={() => quickAdd(product)} aria-label={t("إضافة ", "Add ") + localizedName(locale, product.nameAr, product.nameEn) + t(" للسلة", " to your basket")}><Plus size={18} /><span>{t("إضافة", "Add")}</span></button> : <span className="product-unavailable-label">{suspended ? t("الطلب متوقف", "Ordering paused") : t("غير متاح", "Unavailable")}</span>}
@@ -287,6 +294,20 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
               </section>
             ))}
           </section>
+          {(menu.reviews?.length ?? 0) > 0 && (
+            <section id="reviews" className="store-reviews" aria-labelledby="reviews-title">
+              <h2 id="reviews-title">{t('آراء العملاء', 'What customers say')}</h2>
+              <div className="store-reviews-list">
+                {menu.reviews!.map((r) => (
+                  <article key={r.id} className="store-review">
+                    <div className="store-review-head"><b>{r.customerName}</b><span className="store-review-stars" aria-label={t(`${r.rating} من 5`, `${r.rating} of 5`)}>{'★'.repeat(r.rating)}<span className="opacity-30">{'★'.repeat(5 - r.rating)}</span></span></div>
+                    {r.comment && <p>{r.comment}</p>}
+                    {r.reply && <p className="store-review-reply"><b>{t('رد المطعم: ', 'Restaurant: ')}</b>{r.reply}</p>}
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
           <footer className="store-footer"><span>{localizedName(locale, menu.restaurant.nameAr, menu.restaurant.nameEn)}</span><p>{t("طلبك مباشر من المطعم. الأسعار والوقت بيتأكدوا قبل تأكيد الطلب.", "Order directly from the restaurant. Prices and timing are checked before you confirm.")}</p>{menu.restaurant.phone && <a href={'tel:' + menu.restaurant.phone}>{t("اتصل بالمطعم", "Call the restaurant")}</a>}</footer>
         </div>
 
