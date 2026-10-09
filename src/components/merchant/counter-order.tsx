@@ -1,19 +1,22 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLanguage } from '@/components/language-provider';
-import { estimateLine, lineKey, type CartLine } from '@/client/cart';
+import { estimateLine, lineKey, normalizeCart, type CartLine } from '@/client/cart';
 import { fingerprint, uuid } from '@/client/ids';
 import { deviceId } from '@/client/merchant/engine';
+import { counterAttemptAfterRejection, counterAttemptKey, counterAttemptPayload, counterDraftKey, counterRequestBody, parseCounterAttempt, parseCounterDraft, persistCounterAttempt, prepareCounterAttempt, type CounterAttempt } from '@/client/merchant/counter-draft';
+import { readJson, removeKey, writeJson } from '@/client/storage';
 import { formatMoney } from '@/lib/domain/misc';
 import type { PaymentMethod } from '@/lib/domain/order-machine';
 import { localizedName } from '@/lib/i18n';
-import type { OrderSnapshot, PublicMenu, PublicMenuProduct } from '@/lib/types';
+import type { OrderSnapshot, PublicMenu, PublicMenuProduct, QuoteResponse } from '@/lib/types';
 import { PrintPortal } from './receipt';
 
 interface Props {
   menu: PublicMenu;
   restaurant: { id: string; nameAr: string; nameEn: string; timezone: string };
+  userId: string;
   canPrint: boolean;
 }
 
@@ -21,7 +24,7 @@ interface Props {
  * Counter / walk-in ordering for the cashier: big tap targets, no required customer details,
  * pickup at the restaurant preselected. The order goes straight into the kitchen queue.
  */
-export function CounterOrder({ menu, restaurant, canPrint }: Props) {
+export function CounterOrder({ menu, restaurant, userId, canPrint }: Props) {
   const { locale, t } = useLanguage();
   const pickupPoint = menu.deliveryPoints.find((p) => p.kind === 'PICKUP');
   const [lines, setLines] = useState<CartLine[]>([]);
@@ -35,8 +38,17 @@ export function CounterOrder({ menu, restaurant, canPrint }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<OrderSnapshot | null>(null);
+  const [quoteState, setQuoteState] = useState<{ key: string; quote?: QuoteResponse; error?: string } | null>(null);
+  const [online, setOnline] = useState(true);
   const [printing, setPrinting] = useState<OrderSnapshot | null>(null);
-  const attempt = useRef<{ hash: string; key: string } | null>(null);
+  const [restored, setRestored] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [quoteRefresh, setQuoteRefresh] = useState(0);
+  const attempt = useRef<CounterAttempt | null>(null);
+  const submitting = useRef(false);
+  const locked = busy || pending || !restored;
+  const draftKey = counterDraftKey(restaurant.id, userId);
+  const attemptKey = counterAttemptKey(restaurant.id, userId);
   const suspended = menu.store.reason === 'INACTIVE';
 
   const products = menu.products.filter((p) => category === 'all' || p.categoryId === category);
@@ -45,8 +57,74 @@ export function CounterOrder({ menu, restaurant, canPrint }: Props) {
   const fee = point && point.kind !== 'PICKUP' ? point.deliveryFee : 0;
   const count = lines.reduce((sum, l) => sum + l.quantity, 0);
   const allAvailable = lines.every((l) => estimateLine(menu, l, locale).available);
+  const quoteBody = useMemo(() => ({ restaurantId: restaurant.id, actorUserId: userId, items: lines.map(({ productId, variantId, addonIds, quantity }) => ({ productId, variantId, addonIds, quantity })), deliveryPointId: pointId ?? null }), [lines, pointId, restaurant.id, userId]);
+  const quoteKey = fingerprint(JSON.stringify(quoteBody));
+  const quote = quoteState?.key === quoteKey ? quoteState.quote : undefined;
+  const quoteError = quoteState?.key === quoteKey ? quoteState.error : undefined;
+  const savedTotals = pending ? attempt.current?.totals : null;
+  useEffect(() => {
+    const rawAttempt = readJson<unknown>(attemptKey, null, 'session');
+    const savedAttempt = parseCounterAttempt(rawAttempt, restaurant.id, userId);
+    const rawDraft = readJson<unknown>(draftKey, null, 'session');
+    const draft = parseCounterDraft(rawDraft, restaurant.id, userId);
+    if (rawAttempt && !savedAttempt) removeKey(attemptKey, 'session');
+    if (rawDraft && !draft) removeKey(draftKey, 'session');
+    attempt.current = savedAttempt;
+    // The saved request is authoritative while its result is unknown, even if the draft changed.
+    if (savedAttempt?.pending || (!draft && savedAttempt)) {
+      const payload = counterAttemptPayload(savedAttempt);
+      setLines(normalizeCart(payload.items));
+      setName(payload.customerName ?? '');
+      setPhone(payload.customerPhone ?? '');
+      setNote(payload.note ?? '');
+      setPayment(payload.paymentMethod);
+      setPointId(payload.deliveryPointId ?? undefined);
+    } else if (draft) {
+      setLines(normalizeCart(draft.items));
+      setName(draft.name);
+      setPhone(draft.phone);
+      setNote(draft.note);
+      setPayment(draft.payment);
+      setPointId(draft.pointId ?? undefined);
+    }
+    setPending(!!savedAttempt?.pending);
+    setRestored(true);
+  }, [attemptKey, draftKey, restaurant.id, userId]);
+  useEffect(() => {
+    if (!restored) return;
+    if (!lines.length && !name && !phone && !note) {
+      removeKey(draftKey, 'session');
+      return;
+    }
+    writeJson(draftKey, { restaurantId: restaurant.id, userId, items: lines, name, phone, note, pointId: pointId ?? null, payment }, 'session');
+  }, [restored, draftKey, restaurant.id, userId, lines, name, phone, note, pointId, payment]);
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    update();
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
+  }, []);
+  useEffect(() => {
+    if (!restored || pending || !lines.length || !online) return;
+    const ctrl = new AbortController();
+    let disposed = false;
+    const timeout = setTimeout(() => ctrl.abort(), 12_000);
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch('/api/merchant/orders/quote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(quoteBody), signal: ctrl.signal });
+        const data = await response.json();
+        if (!ctrl.signal.aborted) setQuoteState(response.ok && data.viewerUserId === userId ? { key: quoteKey, quote: data } : { key: quoteKey, error: data.error?.message || t('سجّل الدخول بنفس الحساب عشان تكمل الطلب.', 'Sign in with the same account to continue the order.') });
+      } catch {
+        if (!disposed) setQuoteState({ key: quoteKey, error: t('راجع الاتصال وحاول تاني.', 'Check your connection and try again.') });
+      } finally { clearTimeout(timeout); }
+    }, 200);
+    return () => { disposed = true; ctrl.abort(); clearTimeout(timer); clearTimeout(timeout); };
+  }, [quoteBody, quoteKey, online, locale, pending, restored, quoteRefresh]);
+
 
   const add = (productId: string, variantId: string | null, addonIds: string[], quantity: number) => {
+    if (submitting.current || locked) return;
     const key = lineKey(productId, variantId, addonIds);
     setLines((cur) => {
       const existing = cur.find((l) => l.key === key);
@@ -56,49 +134,73 @@ export function CounterOrder({ menu, restaurant, canPrint }: Props) {
     });
     setDone(null);
   };
-  const setQty = (key: string, quantity: number) =>
+  const setQty = (key: string, quantity: number) => {
+    if (submitting.current || locked) return;
     setLines((cur) => (quantity <= 0 ? cur.filter((l) => l.key !== key) : cur.map((l) => (l.key === key ? { ...l, quantity: Math.min(50, quantity) } : l))));
+  };
 
   const tap = (p: PublicMenuProduct) => {
-    if (!p.isAvailable) return;
+    if (submitting.current || locked || !p.isAvailable) return;
     if (p.variants.length || p.addonGroupIds.length) setPicking(p);
     else add(p.id, null, [], 1);
   };
 
   async function submit() {
-    if (!lines.length || busy || suspended || !allAvailable) return;
+    const replay = attempt.current?.pending ? attempt.current : null;
+    if (submitting.current || !restored || !online || (!replay && (!lines.length || suspended || !allAvailable || !quote))) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setError(t('محتاج إنترنت عشان تسجّل طلب جديد. الطلبات اللي على الشاشة شغالة عادي.', 'You need internet to record a new order. Orders already on the board keep working.'));
       return;
     }
+    // React state is asynchronous; this guard also blocks a second click in the same render.
+    submitting.current = true;
     setBusy(true);
     setError(null);
-    const payload = {
-      restaurantId: restaurant.id,
-      deviceId: deviceId(),
-      items: lines.map(({ productId, variantId, addonIds, quantity }) => ({ productId, variantId, addonIds, quantity })),
-      customerName: name.trim() || null,
-      customerPhone: phone.trim() || null,
-      note: note.trim() || null,
-      paymentMethod: payment,
-      deliveryPointId: pointId ?? null,
-    };
-    // Same order on retry ⇒ same key ⇒ recorded once, even if the first response got lost.
-    const hash = fingerprint(JSON.stringify({ ...payload, deviceId: undefined }));
-    if (attempt.current?.hash !== hash) attempt.current = { hash, key: uuid() };
     try {
+      const nextAttempt = replay ?? prepareCounterAttempt(attempt.current, {
+        restaurantId: restaurant.id,
+        deviceId: deviceId(),
+        items: lines.map(({ productId, variantId, addonIds, quantity }) => ({ productId, variantId, addonIds, quantity })),
+        customerName: name.trim() || null,
+        customerPhone: phone.trim() || null,
+        note: note.trim() || null,
+        paymentMethod: payment,
+        deliveryPointId: pointId ?? null,
+      }, userId, uuid, { total: quote!.total, discount: quote!.discount, deliveryFee: quote!.deliveryFee });
+      let saved = false;
+      try { saved = persistCounterAttempt(nextAttempt, sessionStorage); } catch { /* Browser storage can be blocked. */ }
+      if (!saved && !replay) {
+        setError(t('المتصفح مش قادر يحفظ الطلب بأمان. اسمح بحفظ بيانات الموقع وجرب تاني.', 'The browser cannot save this order safely. Allow site storage and try again.'));
+        return;
+      }
+      attempt.current = nextAttempt;
+      setPending(true);
+      setPicking(null);
       const res = await fetch('/api/merchant/orders', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'idempotency-key': attempt.current.key },
-        body: JSON.stringify(payload),
+        headers: { 'content-type': 'application/json', 'idempotency-key': nextAttempt.key },
+        body: counterRequestBody(nextAttempt, userId),
         signal: AbortSignal.timeout(20_000),
       });
-      const data = (await res.json().catch(() => ({}))) as { order?: OrderSnapshot; error?: { message?: string } };
-      if (!res.ok || !data.order) {
-        setError(data.error?.message ?? t('تعذر تسجيل الطلب. حاول تاني.', 'Could not record the order. Try again.'));
+      const raw: unknown = await res.json().catch(() => null);
+      const data = (raw && typeof raw === 'object' ? raw : {}) as { viewerUserId?: string; order?: OrderSnapshot; error?: { message?: string } };
+      if (!res.ok || data.viewerUserId !== userId || !data.order || data.order.restaurantId !== restaurant.id || typeof data.order.id !== 'string' || typeof data.order.orderNumber !== 'string') {
+        const rejectedAttempt = counterAttemptAfterRejection(nextAttempt, res.status, !!replay);
+        if (!rejectedAttempt.pending) {
+          // A definite rejection permits corrections, while unchanged retries keep the original key.
+          attempt.current = rejectedAttempt;
+          try { persistCounterAttempt(attempt.current, sessionStorage); } catch { /* The in-memory attempt still survives a retry. */ }
+          setPending(false);
+          setQuoteState(null);
+          setQuoteRefresh((value) => value + 1);
+        }
+        setError(data.error?.message ?? t('تعذر تأكيد النتيجة. اضغط «تأكيد نفس الطلب» للمراجعة الآمنة.', 'Could not confirm the result. Press “Confirm same order” to check safely.'));
         return;
       }
       attempt.current = null;
+      removeKey(attemptKey, 'session');
+      removeKey(draftKey, 'session');
+      setPending(false);
       setDone(data.order);
       setLines([]);
       setName('');
@@ -107,8 +209,11 @@ export function CounterOrder({ menu, restaurant, canPrint }: Props) {
       setPayment('CASH');
       setPointId((pickupPoint ?? point)?.id);
     } catch {
-      setError(t('الاتصال انقطع. اضغط تسجيل تاني — الطلب مش هيتكرر.', 'Connection lost. Press record again — it will not be duplicated.'));
+      setError(attempt.current?.pending
+        ? t('الاتصال انقطع. اضغط «تأكيد نفس الطلب» عشان تعرف النتيجة من غير تكرار.', 'Connection lost. Press “Confirm same order” to check the result without recording it twice.')
+        : t('تعذر تجهيز الطلب. راجع البيانات وجرب تاني.', 'Could not prepare the order. Check the details and try again.'));
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -135,7 +240,7 @@ export function CounterOrder({ menu, restaurant, canPrint }: Props) {
               <button
                 key={p.id}
                 onClick={() => tap(p)}
-                disabled={!p.isAvailable || suspended}
+                disabled={!p.isAvailable || suspended || locked}
                 className="relative flex min-h-24 flex-col items-start justify-between rounded-2xl bg-white p-3 text-start shadow-sm ring-1 ring-gray-200 transition active:scale-[.98] disabled:opacity-40"
               >
                 <span className="text-base leading-tight font-bold">{localizedName(locale, p.nameAr, p.nameEn)}</span>
@@ -152,7 +257,7 @@ export function CounterOrder({ menu, restaurant, canPrint }: Props) {
       <aside className="flex flex-col gap-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-gray-200 lg:sticky lg:top-3 lg:max-h-[calc(100dvh-130px)] lg:overflow-y-auto">
         {done && (
           <div className="rounded-xl bg-green-50 p-3 ring-1 ring-green-200" role="status">
-            <p className="font-bold text-green-900">{t(`طلب #${done.orderNumber} اتسجّل واتبعت للمطبخ ✓`, `Order #${done.orderNumber} recorded and sent to the kitchen ✓`)}</p>
+            <p className="font-bold text-green-900">{done.paymentMethod === 'INSTAPAY' ? t(`طلب #${done.orderNumber} اتسجّل — راجع الدفع من شاشة الطلبات`, `Order #${done.orderNumber} saved — verify payment on the orders screen`) : t(`طلب #${done.orderNumber} اتسجّل واتبعت للمطبخ ✓`, `Order #${done.orderNumber} recorded and sent to the kitchen ✓`)}</p>
             {canPrint && <button className="btn btn-secondary btn-sm mt-2" onClick={() => setPrinting(done)}>🖨️ {t('طباعة الفاتورة', 'Print receipt')}</button>}
           </div>
         )}
@@ -168,12 +273,12 @@ export function CounterOrder({ menu, restaurant, canPrint }: Props) {
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">{e.name}</div>
                     {e.detail && <div className="truncate text-xs text-gray-500">{e.detail}</div>}
-                    {!e.available && <div className="text-xs font-semibold text-red-600">{t('غير متاح — احذفه', 'Unavailable — remove it')}</div>}
+                    {!e.available && !pending && <div className="text-xs font-semibold text-red-600">{t('غير متاح — احذفه', 'Unavailable — remove it')}</div>}
                   </div>
                   <div className="flex items-center rounded-lg ring-1 ring-gray-300">
-                    <button className="btn btn-ghost btn-sm" onClick={() => setQty(l.key, l.quantity - 1)} aria-label={t('تقليل', 'Decrease')}>−</button>
+                    <button className="btn btn-ghost btn-sm" disabled={locked} onClick={() => setQty(l.key, l.quantity - 1)} aria-label={t('تقليل', 'Decrease')}>−</button>
                     <span className="w-6 text-center font-bold">{l.quantity}</span>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setQty(l.key, l.quantity + 1)} aria-label={t('زيادة', 'Increase')}>+</button>
+                    <button className="btn btn-ghost btn-sm" disabled={locked} onClick={() => setQty(l.key, l.quantity + 1)} aria-label={t('زيادة', 'Increase')}>+</button>
                   </div>
                   <span className="w-20 text-end text-sm font-semibold">{formatMoney(e.total, locale)}</span>
                 </li>
@@ -182,7 +287,7 @@ export function CounterOrder({ menu, restaurant, canPrint }: Props) {
           </ul>
         )}
 
-        <fieldset className="space-y-1">
+        <fieldset className="space-y-1" disabled={locked}>
           <legend className="label">{t('الاستلام', 'Fulfilment')}</legend>
           <div className="flex flex-wrap gap-2">
             {menu.deliveryPoints.map((p) => (
@@ -194,13 +299,13 @@ export function CounterOrder({ menu, restaurant, canPrint }: Props) {
           </div>
         </fieldset>
 
-        <fieldset className="space-y-1">
+        <fieldset className="space-y-1" disabled={locked}>
           <legend className="label">{t('الدفع', 'Payment')}</legend>
           <div className="grid grid-cols-2 gap-2">
             {(['CASH', 'INSTAPAY'] as const).map((m) => (
               <label key={m} className={`cursor-pointer rounded-xl px-3 py-2 text-center text-sm font-semibold ring-1 ${payment === m ? 'bg-gray-900 text-white ring-gray-900' : 'ring-gray-300'}`}>
                 <input type="radio" name="counter-payment" className="sr-only" checked={payment === m} onChange={() => setPayment(m)} />
-                {m === 'CASH' ? t('💵 كاش', '💵 Cash') : t('📲 إنستاباي (اتحوّل)', '📲 InstaPay (received)')}
+                {m === 'CASH' ? t('💵 كاش', '💵 Cash') : t('📲 إنستاباي — مراجعة الدفع', '📲 InstaPay — verify payment')}
               </label>
             ))}
           </div>
@@ -209,24 +314,34 @@ export function CounterOrder({ menu, restaurant, canPrint }: Props) {
         <details className="rounded-xl bg-gray-50 p-2">
           <summary className="cursor-pointer text-sm font-semibold">{t('اسم العميل وملاحظة (اختياري)', 'Customer name & note (optional)')}</summary>
           <div className="mt-2 space-y-2">
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder={t('الاسم — عشان تناديه', 'Name — to call out')} aria-label={t('اسم العميل', 'Customer name')} />
-            <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={20} dir="ltr" inputMode="tel" placeholder="01xxxxxxxxx" aria-label={t('موبايل العميل', 'Customer phone')} />
-            <input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder={t('ملاحظة للمطبخ', 'Note for the kitchen')} aria-label={t('ملاحظة', 'Note')} />
+            <input className="input" disabled={locked} value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder={t('الاسم — عشان تناديه', 'Name — to call out')} aria-label={t('اسم العميل', 'Customer name')} />
+            <input className="input" disabled={locked} value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={20} dir="ltr" inputMode="tel" placeholder="01xxxxxxxxx" aria-label={t('موبايل العميل', 'Customer phone')} />
+            <input className="input" disabled={locked} value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder={t('ملاحظة للمطبخ', 'Note for the kitchen')} aria-label={t('ملاحظة', 'Note')} />
           </div>
         </details>
 
         <div className="mt-auto space-y-2 border-t border-gray-100 pt-3">
-          {fee > 0 && <div className="flex justify-between text-sm"><span>{t('التوصيل', 'Delivery')}</span><span>{formatMoney(fee, locale)}</span></div>}
-          <div className="flex justify-between text-lg font-black"><span>{t('الإجمالي', 'Total')}</span><span>{formatMoney(subtotal + fee, locale)}</span></div>
+          {(savedTotals?.discount ?? quote?.discount ?? 0) > 0 && <div className="flex justify-between text-sm text-green-700"><span>{t('الخصم', 'Discount')}</span><span>−{formatMoney(savedTotals?.discount ?? quote?.discount ?? 0, locale)}</span></div>}
+          {(savedTotals?.deliveryFee ?? quote?.deliveryFee ?? fee) > 0 && <div className="flex justify-between text-sm"><span>{t('التوصيل', 'Delivery')}</span><span>{formatMoney(savedTotals?.deliveryFee ?? quote?.deliveryFee ?? fee, locale)}</span></div>}
+          <div className="flex justify-between text-lg font-black"><span>{t('الإجمالي', 'Total')}</span><span>{formatMoney(savedTotals?.total ?? quote?.total ?? subtotal + fee, locale)}</span></div>
+          {pending && <p className="rounded-lg bg-amber-50 p-2 text-sm font-semibold" role="status">{t('الطلب محفوظ وبنراجع إذا كان اتسجّل. أكّد نفس الطلب قبل أي تعديل عشان ما يتكررش.', 'This order is saved while we check whether it was recorded. Confirm the same order before making changes to avoid a duplicate.')}</p>}
+          {quoteError && !pending && <div className="rounded-lg bg-amber-50 p-2 text-sm" role="alert"><p>{quoteError}</p><button className="btn btn-secondary btn-sm mt-2" disabled={busy || !online} onClick={() => { setQuoteState(null); setQuoteRefresh((value) => value + 1); }}>{t('حاول تاني', 'Try again')}</button></div>}
+          {!online && <p className="rounded-lg bg-amber-50 p-2 text-sm" role="status">{t('اتصل بالإنترنت لتسجيل طلب جديد.', 'Connect to the internet to record a new order.')}</p>}
           {error && <p className="rounded-lg bg-red-50 p-2 text-sm font-semibold text-red-700" role="alert">{error}</p>}
-          <button className="btn btn-success btn-lg w-full text-lg" disabled={!lines.length || busy || suspended || !allAvailable} onClick={submit}>
-            {busy ? t('جاري التسجيل…', 'Recording…') : t('سجّل الطلب وابعته للمطبخ', 'Record & send to kitchen')}
+          <button className="btn btn-success btn-lg w-full text-lg" disabled={!restored || busy || !online || (!pending && (!lines.length || suspended || !allAvailable || !quote))} onClick={submit}>
+            {busy ? t('جاري التأكيد…', 'Confirming…') : pending ? t('تأكيد نفس الطلب', 'Confirm same order') : t('سجّل الطلب وابعته للمطبخ', 'Record & send to kitchen')}
           </button>
-          {lines.length > 0 && <button className="btn btn-ghost btn-sm w-full text-red-600" onClick={() => setLines([])}>{t('مسح الطلب', 'Clear order')}</button>}
+          {lines.length > 0 && <button className="btn btn-ghost btn-sm w-full text-red-600" disabled={locked} onClick={() => {
+            if (submitting.current || locked) return;
+            attempt.current = null;
+            removeKey(attemptKey, 'session');
+            setLines([]);
+            setError(null);
+          }}>{t('مسح الطلب', 'Clear order')}</button>}
         </div>
       </aside>
 
-      {picking && <OptionPicker menu={menu} product={picking} onClose={() => setPicking(null)} onAdd={(v, a, q) => { add(picking.id, v, a, q); setPicking(null); }} />}
+      {picking && !locked && <OptionPicker menu={menu} product={picking} onClose={() => setPicking(null)} onAdd={(v, a, q) => { add(picking.id, v, a, q); setPicking(null); }} />}
       {printing && <PrintPortal order={printing} restaurantName={localizedName(locale, restaurant.nameAr, restaurant.nameEn)} timezone={restaurant.timezone} onDone={() => setPrinting(null)} />}
     </div>
   );

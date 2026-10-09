@@ -1,5 +1,6 @@
 /** DTOs shared by the server and the browser apps. Dates travel as epoch milliseconds. */
 import type { Fulfillment, OrderAction, OrderChannel, OrderStatus, PaymentMethod, PaymentStatus } from './domain/order-machine';
+import type { PricingMode } from './domain/pricing';
 import type { LoadLevel } from './domain/queue';
 import type { EffectiveStatus, StatusReason } from './domain/store-status';
 
@@ -62,6 +63,9 @@ export interface OrderSnapshot {
   fulfillment: Fulfillment;
   channel: OrderChannel;
   items: SnapshotItem[];
+  pricingMode?: PricingMode;
+  platformFeeAmount?: number;
+  platformFeeBps?: number;
   subtotal: number;
   discountTotal: number;
   deliveryFee: number;
@@ -143,6 +147,9 @@ export interface TrackingView {
     deliveryPointNameEn?: string | null;
     fulfillment: Fulfillment;
     items: SnapshotItem[];
+    pricingMode?: PricingMode;
+    platformFeeAmount?: number;
+    platformFeeBps?: number;
     subtotal: number;
     discountTotal: number;
     deliveryFee: number;
@@ -198,6 +205,8 @@ export interface PublicMenu {
     phone: string | null;
     minOrderAmount: number;
     requirePhone: boolean;
+    /** Menu item prices are merchant base prices. Fee is added once in the order quote. */
+    platformFeeBps?: number;
   };
   store: { status: EffectiveStatus; reason: StatusReason; etaMinutes: number };
   categories: { id: string; nameAr: string; nameEn: string }[];
@@ -222,6 +231,9 @@ export interface QuoteResponse {
     quantity: number;
     lineTotal: number;
   }[];
+  pricingMode?: PricingMode;
+  platformFeeAmount?: number;
+  platformFeeBps?: number;
   subtotal: number;
   discount: number;
   promotion: { name: string; code: string | null } | null;

@@ -48,7 +48,7 @@ async function burst(name: string, fn: (index: number) => ReturnType<typeof requ
   return responses;
 }
 async function action(orderId: string, actionName: string, eventId = randomUUID()) {
-  const r = await request('/api/merchant/actions', { restaurantId, deviceId, actions: [{ eventId, orderId, action: actionName, occurredAt: Date.now() }] }, undefined, true);
+  const r = await request('/api/merchant/actions', { restaurantId, actorUserId: userId, deviceId, actions: [{ eventId, orderId, action: actionName, occurredAt: Date.now() }] }, undefined, true);
   assert.equal(r.status, 200);
   assert.equal(r.data.results[0].result, 'applied', JSON.stringify(r.data));
   return r;
@@ -86,28 +86,28 @@ async function main() {
     assert.equal(initialOrders.length, 100);
     await d.update(s.products).set({ basePrice: 1500 }).where(eq(s.products.id, product.id));
     const changedQuote = await request(`${menuPath}/quote`, orderBody(0));
-    assert.equal(changedQuote.data.total, 1500, 'Menu changes must affect new quotes.');
-    assert(initialOrders.every((o) => o.total === 1000), 'Existing orders must retain frozen prices.');
+    assert.equal(changedQuote.data.total, 1575, 'Menu changes must affect new quotes.');
+    assert(initialOrders.every((o) => o.total === 1050 && o.platformFeeAmount === 50 && o.merchantNet === 1000), 'Existing orders must retain frozen prices.');
     await d.update(s.products).set({ basePrice: 1000 }).where(eq(s.products.id, product.id));
     const invalid = await request(`${menuPath}/orders`, { ...orderBody(0), customerName: 'X' }, `${stamp}-invalid`);
     assert.equal(invalid.status, 400);
     assert(!/[\u0600-\u06ff]/.test(invalid.data.error.message), 'English customer errors must be English.');
     const mismatch = await request(`${menuPath}/orders`, orderBody(999), keys[0]);
     assert.equal(mismatch.status, 422);
-    for (const phase of ['ACCEPT', 'START_PREPARING', 'MARK_READY', 'OUT_FOR_DELIVERY', 'MARK_ARRIVED', 'COMPLETE']) {
+    for (const phase of ['START_PREPARING', 'MARK_READY', 'OUT_FOR_DELIVERY', 'MARK_ARRIVED', 'COMPLETE']) {
       await burst(`phase_${phase}`, (i) => action(ids[i], phase));
     }
     await burst('trackingReads', (i) => request(`/api/public/orders/${created[i].data.trackingToken}`));
     const all = await d.select().from(s.orders).where(eq(s.orders.restaurantId, restaurantId));
     assert(all.every((o) => o.status === 'COMPLETED' && o.paymentStatus === 'PAYMENT_VERIFIED'));
     const events = await d.select().from(s.orderEvents).where(eq(s.orderEvents.restaurantId, restaurantId)).orderBy(asc(s.orderEvents.seq));
-    assert.equal(events.length, 700);
-    assert.deepEqual(events.map((event) => event.seq), Array.from({ length: 700 }, (_, i) => i + 1));
-    const sync = await request(`/api/merchant/sync?restaurantId=${restaurantId}&deviceId=${deviceId}&cursor=0`, undefined, undefined, true);
-    assert.equal(sync.status, 200); assert.equal(sync.data.cursor, 700); assert.equal(sync.data.orders.length, 100);
+    assert.equal(events.length, 600);
+    assert.deepEqual(events.map((event) => event.seq), Array.from({ length: 600 }, (_, i) => i + 1));
+    const sync = await request(`/api/merchant/sync?restaurantId=${restaurantId}&deviceId=${deviceId}&cursor=0&actorUserId=${userId}`, undefined, undefined, true);
+    assert.equal(sync.status, 200); assert.equal(sync.data.cursor, 600); assert.equal(sync.data.orders.length, 100);
     const stats = await periodStats(d, new Date(Date.now() - 3_600_000), new Date(Date.now() + 3_600_000), restaurantId);
-    assert.equal(stats.completed, 100); assert.equal(stats.sales, 100_000); assert.equal(stats.commission, 5000); assert.equal(stats.merchantNet, 95_000);
-    results.integrity = { distinctOrders: 100, replayDuplicates: 0, completedOrders: 100, gapFreeEvents: 700, syncedOrders: 100, salesEGP: 1000, commissionEGP: 50, restaurantNetEGP: 950, priceSnapshotsPreserved: true };
+    assert.equal(stats.completed, 100); assert.equal(stats.sales, 105_000); assert.equal(stats.commission, 5000); assert.equal(stats.merchantNet, 100_000);
+    results.integrity = { distinctOrders: 100, replayDuplicates: 0, completedOrders: 100, gapFreeEvents: 600, syncedOrders: 100, salesEGP: 1050, commissionEGP: 50, restaurantNetEGP: 1000, priceSnapshotsPreserved: true };
 
     // Kitchen capacity is independent of request throughput: filled kitchens reject new orders.
     await d.update(s.queueConfigs).set({ config: { ...config, maxAcceptedLoad: 5, autoPause: true } }).where(eq(s.queueConfigs.restaurantId, restaurantId));
@@ -115,7 +115,7 @@ async function main() {
     for (let i = 0; i < 5; i++) {
       const r = await request(`${menuPath}/orders`, orderBody(200 + i), `${stamp}-cap-${i}`);
       assert.equal(r.status, 201); capacityOrders.push(r.data.orderId as string);
-      await action(r.data.orderId, 'ACCEPT');
+      assert.equal(r.data.status, 'CONFIRMED');
     }
     await burst('fullKitchenRejection', (i) => request(`${menuPath}/orders`, orderBody(300 + i), `${stamp}-full-${i}`), 409);
     const beforeRelease = await d.select().from(s.orders).where(eq(s.orders.restaurantId, restaurantId));
@@ -126,11 +126,11 @@ async function main() {
     results.kitchenCapacity = { limit: 5, confirmed: 5, rejectedWhileFull: 100, resumedAfterReady: true };
 
     // Identity/permission and invalid-transition guards remain active through the HTTP layer.
-    const unauthenticated = await request(`/api/merchant/sync?restaurantId=${restaurantId}&deviceId=${deviceId}&cursor=0`);
+    const unauthenticated = await request(`/api/merchant/sync?restaurantId=${restaurantId}&deviceId=${deviceId}&cursor=0&actorUserId=${userId}`);
     assert.equal(unauthenticated.status, 401);
-    const forbidden = await request(`/api/merchant/sync?restaurantId=${randomUUID()}&deviceId=${deviceId}&cursor=0`, undefined, undefined, true);
+    const forbidden = await request(`/api/merchant/sync?restaurantId=${randomUUID()}&deviceId=${deviceId}&cursor=0&actorUserId=${userId}`, undefined, undefined, true);
     assert.equal(forbidden.status, 403);
-    const staleAction = await request('/api/merchant/actions', { restaurantId, deviceId, actions: [{ eventId: randomUUID(), orderId: ids[0], action: 'ACCEPT', occurredAt: Date.now() }] }, undefined, true);
+    const staleAction = await request('/api/merchant/actions', { restaurantId, actorUserId: userId, deviceId, actions: [{ eventId: randomUUID(), orderId: ids[0], action: 'ACCEPT', occurredAt: Date.now() }] }, undefined, true);
     assert.equal(staleAction.data.results[0].result, 'rejected');
     results.guards = { signInRequired: true, crossRestaurantDenied: true, invalidTransitionRejected: true, idempotencyMismatchRejected: true, englishErrors: true };
 
@@ -155,6 +155,21 @@ async function main() {
     const [phoneCounter] = await d.select().from(s.rateLimits).where(eq(s.rateLimits.key, `order:phone:${retryPhone}`));
     assert.equal(phoneCounter.count, 1, 'Concurrent retries must consume one phone allowance.');
     results.phoneProtection = { attemptedDistinct: 9, admitted: 8, rateLimited: 1, successfulReplaysAfterLimit: 100, simultaneousSameKeyAttempts: 100, simultaneousSameKeyCreated: 1, phoneAllowanceConsumed: 1 };
+    // Walk-in orders use base restaurant prices, no platform fee, and no travel time.
+    const [pickup] = await d.insert(s.deliveryPoints).values({ restaurantId, nameAr: 'استلام من المحل', nameEn: 'Restaurant pickup', kind: 'PICKUP', deliveryFee: 12345, extraMinutes: 99 }).returning();
+    const counterBody = (index: number) => ({ restaurantId, actorUserId: userId, customerName: `Walk-in ${index}`, paymentMethod: 'CASH', deliveryPointId: pickup.id, items: [{ productId: product.id, quantity: 1, addonIds: [], variantId: null }] });
+    const counterKeys = Array.from({ length: 100 }, () => `${stamp}-counter-${randomUUID()}`);
+    const counterCreated = await burst('counterCheckout', (i) => request('/api/merchant/orders', counterBody(i), counterKeys[i], true), 201);
+    assert.equal(new Set(counterCreated.map((r) => r.data.orderId)).size, 100);
+    counterCreated.forEach((r) => { assert.equal(r.data.total, 1000); assert.equal(r.data.status, 'CONFIRMED'); });
+    const counterReplay = await burst('counterReplay', (i) => request('/api/merchant/orders', counterBody(i), counterKeys[i], true));
+    counterReplay.forEach((r, i) => { assert.equal(r.data.orderId, counterCreated[i].data.orderId); assert.equal(r.data.replayed, true); });
+    await burst('counterReady', (i) => action(counterCreated[i].data.orderId, 'MARK_READY'));
+    await burst('counterHandOver', (i) => action(counterCreated[i].data.orderId, 'COMPLETE'));
+    const counterRows = await d.select().from(s.orders).where(and(eq(s.orders.restaurantId, restaurantId), eq(s.orders.channel, 'COUNTER')));
+    assert.equal(counterRows.length, 100);
+    assert(counterRows.every((o) => o.total === 1000 && o.merchantNet === 1000 && o.commissionAmount === 0 && o.platformFeeAmount === 0 && o.pricingMode === 'COUNTER_NO_FEE' && o.fulfillment === 'PICKUP' && o.deliveryFee === 0 && o.status === 'COMPLETED' && o.paymentStatus === 'PAYMENT_VERIFIED' && o.estimatedArrivalAt?.getTime() === o.estimatedReadyAt?.getTime()));
+    results.counterIntegrity = { distinctOrders: 100, replayDuplicates: 0, completedOrders: 100, platformFeeEGP: 0, deliveryFeeEGP: 0, restaurantNetEGP: 1000, noTravelTime: true, oneReadyButton: true };
     results.passed = true;
   } finally {
     if (restaurantId) {
@@ -165,7 +180,7 @@ async function main() {
         await tx.delete(s.restaurants).where(eq(s.restaurants.id, restaurantId!));
         if (userId) await tx.delete(s.users).where(eq(s.users.id, userId));
         if (testPhones.length) await tx.delete(s.customers).where(inArray(s.customers.phone, testPhones));
-        await tx.delete(s.rateLimits).where(inArray(s.rateLimits.key, [`order:ip:${ip}`, `quote:${ip}`, ...testPhones.map((phone) => `order:phone:${phone}`)]));
+        await tx.delete(s.rateLimits).where(inArray(s.rateLimits.key, [`order:ip:${ip}`, `quote:${ip}`, `counter:${userId}`, `counter-quote:${userId}`, ...testPhones.map((phone) => `order:phone:${phone}`)]));
       });
       assert.equal((await d.select().from(s.restaurants).where(eq(s.restaurants.id, restaurantId))).length, 0);
       results.temporaryFixturesRemoved = true;

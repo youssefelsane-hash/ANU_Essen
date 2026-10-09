@@ -1,4 +1,5 @@
 import { requireAuth } from '@/server/auth/session';
+import { assertRequestActor } from '@/server/auth/request-identity';
 import { AppError } from '@/server/errors';
 import { assertSameOrigin, json, readJson, route } from '@/server/http';
 import { log } from '@/server/log';
@@ -17,7 +18,9 @@ const PERMANENT = new Set(['INVALID_TRANSITION', 'FORBIDDEN', 'NOT_FOUND', 'VALI
 export const POST = route(async (req, _ctx, meta) => {
   assertSameOrigin(req);
   const auth = await requireAuth();
-  const body = actionsBatchSchema.parse(await readJson(req, 200_000));
+  const input = await readJson(req, 200_000);
+  assertRequestActor(auth, input && typeof input === 'object' ? (input as Record<string, unknown>).actorUserId : undefined);
+  const body = actionsBatchSchema.parse(input);
   const results: ActionResult[] = [];
   const blockedOrders = new Set<string>();
 
@@ -47,5 +50,5 @@ export const POST = route(async (req, _ctx, meta) => {
       }
     }
   }
-  return json({ serverTime: Date.now(), results });
+  return json({ serverTime: Date.now(), results, viewerUserId: auth.user.id });
 });

@@ -159,6 +159,7 @@ export async function loadPublicMenu(d: Db, slug: string, now = new Date()): Pro
       phone: r.phone,
       minOrderAmount: r.minOrderAmount,
       requirePhone: r.requirePhone,
+      platformFeeBps: r.commissionBps,
     },
     store: { status: live.status, reason: live.reason, etaMinutes: live.etaMinutes },
     categories: categoryRows.map((c) => ({ id: c.id, nameAr: c.nameAr, nameEn: c.nameEn })),

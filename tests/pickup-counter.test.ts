@@ -55,7 +55,7 @@ describe('pickup at the restaurant', () => {
     expect(atShop.etaMinutes).toBeLessThan(atGate.etaMinutes);
     expect(atShop.deliveryFee).toBe(0);
     // Default stays the university gate.
-    expect((await createOrder('alrayez', online(), key())).status).toBe('CREATED');
+    expect((await createOrder('alrayez', online(), key())).status).toBe('CONFIRMED');
   });
 
   it('goes ready → handed over at the counter, never out for delivery', async () => {
@@ -64,7 +64,6 @@ describe('pickup at the restaurant', () => {
     expect(row.fulfillment).toBe('PICKUP');
     expect(row.deliveryFee).toBe(0);
 
-    await applyOrderAction({ orderId: o.orderId, action: 'ACCEPT', actor: staff(cashier) });
     const [confirmed] = await d.select().from(s.orders).where(eq(s.orders.id, o.orderId));
     expect(confirmed.estimatedArrivalAt!.getTime()).toBe(confirmed.estimatedReadyAt!.getTime());
 
@@ -83,7 +82,6 @@ describe('pickup at the restaurant', () => {
 
   it('a delivery order cannot be "handed over" straight from ready', async () => {
     const o = await createOrder('alrayez', online({ deliveryPointId: gateId }), key());
-    await applyOrderAction({ orderId: o.orderId, action: 'ACCEPT', actor: staff(cashier) });
     await applyOrderAction({ orderId: o.orderId, action: 'MARK_READY', actor: staff(kitchen) });
     await expectCode(applyOrderAction({ orderId: o.orderId, action: 'COMPLETE', actor: staff(cashier) }), 'INVALID_TRANSITION');
   });
@@ -112,10 +110,11 @@ describe('counter (walk-in) orders', () => {
     expect(await d.select().from(s.orders).where(eq(s.orders.idempotencyKey, k))).toHaveLength(1);
   });
 
-  it('InstaPay at the counter is marked paid; cash works even if disabled for online orders', async () => {
+  it('InstaPay at the counter awaits explicit verification; cash works even if disabled for online orders', async () => {
     const paid = await createCounterOrder(demo.restaurantId, { items: items(), paymentMethod: 'INSTAPAY' }, key(), asStaff(cashier));
     const [row] = await d.select().from(s.orders).where(eq(s.orders.id, paid.orderId));
-    expect(row).toMatchObject({ status: 'CONFIRMED', paymentStatus: 'PAYMENT_VERIFIED' });
+    expect(row).toMatchObject({ status: 'AWAITING_PAYMENT', paymentStatus: 'UNPAID' });
+    await applyOrderAction({ orderId: paid.orderId, action: 'VERIFY_PAYMENT', actor: staff(cashier) });
 
     await d.update(s.restaurantPaymentMethods).set({ isEnabled: false })
       .where(and(eq(s.restaurantPaymentMethods.restaurantId, demo.restaurantId), eq(s.restaurantPaymentMethods.method, 'CASH')));
@@ -124,14 +123,14 @@ describe('counter (walk-in) orders', () => {
       .where(and(eq(s.restaurantPaymentMethods.restaurantId, demo.restaurantId), eq(s.restaurantPaymentMethods.method, 'CASH')));
   });
 
-  it('respects the counter commission setting', async () => {
+  it('never charges counter orders, including when a legacy counter commission flag was enabled', async () => {
     const charged = await createCounterOrder(demo.restaurantId, { items: items(), paymentMethod: 'CASH' }, key(), asStaff(cashier));
     await d.update(s.restaurants).set({ counterCommissionEnabled: false }).where(eq(s.restaurants.id, demo.restaurantId));
     const waived = await createCounterOrder(demo.restaurantId, { items: items(), paymentMethod: 'CASH' }, key(), asStaff(cashier));
     await d.update(s.restaurants).set({ counterCommissionEnabled: true }).where(eq(s.restaurants.id, demo.restaurantId));
     const [c] = await d.select().from(s.orders).where(eq(s.orders.id, charged.orderId));
     const [w] = await d.select().from(s.orders).where(eq(s.orders.id, waived.orderId));
-    expect(c.commissionAmount).toBeGreaterThan(0);
+    expect(c).toMatchObject({ pricingMode: 'COUNTER_NO_FEE', platformFeeAmount: 0, commissionBps: 0, commissionAmount: 0, merchantNet: c.total });
     expect(w).toMatchObject({ commissionBps: 0, commissionAmount: 0, merchantNet: w.total });
   });
 

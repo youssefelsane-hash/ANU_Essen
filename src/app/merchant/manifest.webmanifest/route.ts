@@ -1,14 +1,18 @@
+import { getAuth } from '@/server/auth/session';
+import { isDeliveryOnly } from '@/server/auth/authz';
 import { getLocale } from '@/lib/i18n/server';
 import { direction, isLocale, text } from '@/lib/i18n';
 
 export async function GET(request: Request) {
   const requested = new URL(request.url).searchParams.get('lang');
   const locale = isLocale(requested) ? requested : await getLocale('staff');
+  const auth = await getAuth();
+  const deliveryOnly = !!auth && isDeliveryOnly(auth);
   return Response.json({
     id: '/merchant',
-    name: text(locale, 'إدارة المطعم — الطلبات', 'Restaurant workspace — Orders'),
+    name: deliveryOnly ? text(locale, 'التوصيل — الطلبات', 'Courier workspace — Deliveries') : text(locale, 'إدارة المطعم — الطلبات', 'Restaurant workspace — Orders'),
     short_name: text(locale, 'الطلبات', 'Orders'),
-    start_url: '/merchant',
+    start_url: deliveryOnly ? '/merchant/delivery' : '/merchant',
     scope: '/merchant',
     display: 'standalone',
     orientation: 'any',

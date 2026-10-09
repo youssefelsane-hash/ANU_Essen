@@ -25,7 +25,7 @@ export default async function MerchantDashboard({ searchParams }: { searchParams
   const locale = await getLocale('staff');
   const t = (ar: string, en: string) => text(locale, ar, en);
   const copy = labels(locale);
-  const { restaurant, permissions } = await merchantContext('/merchant/dashboard');
+  const { restaurant, permissions, auth } = await merchantContext('/merchant/dashboard');
   if (!restaurant || !permissions.has('reports.view')) return <p className="p-6 text-center">{t('لا تملك صلاحية عرض التقارير.', 'You do not have permission to view reports.')}</p>;
   const tz = restaurant.timezone;
   const { date } = await searchParams;
@@ -107,13 +107,14 @@ export default async function MerchantDashboard({ searchParams }: { searchParams
         <details className="card overflow-x-auto">
           <summary className="mb-3 cursor-pointer font-bold">{t('الدليفري — تسليم وتحصيل اليوم', 'Couriers — today’s deliveries & cash')}</summary>
           <table className="table">
-            <thead><tr><th>{t('الدليفري', 'Courier')}</th><th>{t('في الطريق', 'On the way')}</th><th>{t('اتسلّم', 'Delivered')}</th><th>{t('كاش اتحصّل (يتسلّم للكاشير)', 'Cash collected (to hand to the cashier)')}</th><th>{t('كاش لسه هيتحصّل', 'Cash still to collect')}</th></tr></thead>
+            <thead><tr><th>{t('الدليفري', 'Courier')}</th><th>{t('في الطريق', 'On the way')}</th><th>{t('اتسلّم', 'Delivered')}</th><th>{t('كاش اتحصّل في اليوم', 'Cash collected that day')}</th><th>{t('كاش لسه هيتحصّل', 'Cash still to collect')}</th><th>{t('العهدة المتبقية · كل الأيام', 'Outstanding · all time')}</th></tr></thead>
             <tbody>
               {couriers.map((c) => (
-                <tr key={c.userId}><td className="font-semibold">{c.name}</td><td>{c.onTheWay}</td><td>{c.delivered}</td><td className="font-bold">{formatMoney(c.cashCollected, locale)}</td><td>{formatMoney(c.cashPending, locale)}</td></tr>
+                <tr key={c.userId}><td className="font-semibold">{c.name}</td><td>{c.onTheWay}</td><td>{c.delivered}</td><td className="font-bold">{formatMoney(c.cashCollected, locale)}</td><td>{formatMoney(c.cashPending, locale)}</td><td className="font-bold">{formatMoney(c.outstanding, locale)}</td></tr>
               ))}
             </tbody>
           </table>
+          {(permissions.has('couriers.cash') || auth.platformPermissions.has('platform.finance')) && <Link href="/merchant/couriers" className="btn btn-secondary mt-3">{t('استلام الكاش ومراجعة الحسابات', 'Receive cash & review balances')}</Link>}
         </details>
       )}
 

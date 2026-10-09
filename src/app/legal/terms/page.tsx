@@ -22,6 +22,7 @@ export default function TermsPage() {
           ['اكتب اسمك ورقمك صح عشان المطعم يقدر يوصلك.', 'Enter your real name and number so the restaurant can reach you.'],
         ] },
         { title: ['الدفع', 'Payment'], body: [
+          ['أسعار المنيو هي أسعار المطعم. قد تضاف رسوم منصة على طلبات الأونلاين، وتظهر قيمتها ورسوم التوصيل والإجمالي قبل تأكيد الطلب. طلبات الكاشير داخل المحل بدون رسوم منصة.', 'Menu prices are restaurant prices. Online orders may carry a platform fee; its amount, delivery fees and the total are shown before you confirm. Counter orders at the restaurant have no platform fee.'],
           ['الدفع كاش عند الاستلام أو تحويل إنستاباي على حساب المطعم. طلب إنستاباي بيتأكد بعد ما المطعم يراجع التحويل، ولو ما اتدفعش في المهلة بيتلغي تلقائيًا.', 'Pay cash on pickup or by InstaPay to the restaurant’s account. An InstaPay order is confirmed once the restaurant checks the transfer, and it is cancelled automatically if not paid in time.'],
         ] },
         { title: ['الإلغاء والاسترجاع', 'Cancellations and refunds'], body: [

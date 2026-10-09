@@ -31,7 +31,7 @@ export default async function SettingsPage() {
       <ActionForm action={saveSettingsAction} className="card space-y-3">
         <div><label className="label" htmlFor="platform-name">{t("اسم المنصة", "Platform name")}</label><input id="platform-name" name="platformName" defaultValue={name} className="input" /></div>
         <div><label className="label" htmlFor="platform-timezone">{t("المنطقة الزمنية للتقارير", "Reporting timezone")}</label><input id="platform-timezone" name="timezone" defaultValue={tz} className="input" /></div>
-        <div><label className="label" htmlFor="platform-commission">{t("العمولة الافتراضية للمطاعم الجديدة (%)", "Default commission for new restaurants (%)")}</label><input id="platform-commission" name="defaultCommissionPercent" defaultValue={commission / 100} className="input" inputMode="decimal" /></div>
+        <div><label className="label" htmlFor="platform-commission">{t("نسبة المنصة المضافة للأونلاين للمطاعم الجديدة (%)", "Default online platform fee for new restaurants (%)")}</label><input id="platform-commission" name="defaultCommissionPercent" defaultValue={commission / 100} className="input" inputMode="decimal" /></div>
         <SubmitButton>{t("حفظ", "Save")}</SubmitButton>
       </ActionForm>
       <p className="mt-3 text-xs text-gray-500">{t('يمكن ضبط وقت التحضير لكل مطعم من تبويب «وقت التحضير».', 'Set each restaurant preparation time on its Preparation time tab.')}</p>

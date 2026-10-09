@@ -16,14 +16,14 @@ import {
 } from '../db/schema';
 import { AppError } from '../errors';
 import { initialStatusFor, type OrderChannel, type OrderStatus, type PaymentMethod } from '../../lib/domain/order-machine';
-import { egp, priceCart, type PricedCart } from '../../lib/domain/pricing';
+import { egp, priceCart, type PricedCart, type PricingMode } from '../../lib/domain/pricing';
 import { formatOrderNumber, normalizeEgyptianPhone } from '../../lib/domain/misc';
 import { acceptsOrders } from '../../lib/domain/store-status';
 import { computeEta } from '../../lib/domain/queue';
 import type { CreateOrderInput } from '../../lib/validation';
 import type { QuoteResponse } from '../../lib/types';
 import { loadMenuCatalog, loadPromotionRules } from './menu';
-import { applyOrderAction } from './order-actions';
+import { audit } from './audit';
 import { hasPermission, type AuthzSnapshot } from '../../lib/domain/permissions';
 import { closedMessage, getRestaurant, getRestaurantBySlug, getStoreLive, type RestaurantRow } from './store';
 
@@ -38,7 +38,7 @@ async function resolveDeliveryPoint(d: Db, restaurantId: string, id?: string | n
   return point;
 }
 
-async function priceFor(d: Db, r: RestaurantRow, input: { items: CreateOrderInput['items']; promoCode?: string | null; deliveryPointId?: string | null }, now: Date, commissionBps = r.commissionBps) {
+async function priceFor(d: Db, r: RestaurantRow, input: { items: CreateOrderInput['items']; promoCode?: string | null; deliveryPointId?: string | null }, now: Date, pricingMode: PricingMode = 'ONLINE_PLATFORM_FEE') {
   const point = await resolveDeliveryPoint(d, r.id, input.deliveryPointId);
   const [catalog, promos] = await Promise.all([loadMenuCatalog(d, r.id), loadPromotionRules(d, r.id)]);
   const priced = priceCart(input.items, {
@@ -50,13 +50,17 @@ async function priceFor(d: Db, r: RestaurantRow, input: { items: CreateOrderInpu
     // Collecting at the restaurant never carries a delivery fee.
     deliveryFee: point.kind === 'PICKUP' ? 0 : point.deliveryFee,
     minOrderAmount: r.minOrderAmount,
-    commissionBps,
+    commissionBps: pricingMode === 'COUNTER_NO_FEE' ? 0 : r.commissionBps,
+    pricingMode,
   });
   return { priced, point };
 }
 
 function toQuote(priced: PricedCart, etaMinutes: number): QuoteResponse {
   return {
+    pricingMode: priced.pricingMode,
+    platformFeeAmount: priced.platformFeeAmount,
+    platformFeeBps: priced.platformFeeBps,
     lines: priced.lines.map((l) => ({
       productId: l.productId,
       variantId: l.variantId,
@@ -82,15 +86,32 @@ function toQuote(priced: PricedCart, etaMinutes: number): QuoteResponse {
   };
 }
 
-export async function quote(slug: string, input: { items: CreateOrderInput['items']; promoCode?: string | null; deliveryPointId?: string | null }) {
+export type QuoteInput = { items: CreateOrderInput['items']; promoCode?: string | null; deliveryPointId?: string | null };
+
+async function quoteFor(d: Db, r: RestaurantRow, input: QuoteInput, pricingMode: PricingMode): Promise<QuoteResponse> {
+  if (!r.isActive) throw new AppError('STORE_CLOSED', closedMessage('CLOSED', 'INACTIVE'));
+  const now = new Date();
+  const [{ priced, point }, live] = await Promise.all([priceFor(d, r, input, now, pricingMode), getStoreLive(d, r, now)]);
+  const eta = computeEta({ confirmedAt: now, activeLoad: live.load, orderLoad: priced.loadUnits, config: live.config, extraDeliveryMinutes: point.extraMinutes, pickup: point.kind === 'PICKUP' });
+  return toQuote(priced, eta.prepMinutes + eta.deliveryMinutes);
+}
+
+export async function quote(slug: string, input: QuoteInput) {
   const d = db();
   const r = await getRestaurantBySlug(d, slug);
   if (!r) throw new AppError('NOT_FOUND', 'المحل غير موجود');
-  if (!r.isActive) throw new AppError('STORE_CLOSED', closedMessage('CLOSED', 'INACTIVE'));
-  const now = new Date();
-  const [{ priced, point }, live] = await Promise.all([priceFor(d, r, input, now), getStoreLive(d, r, now)]);
-  const eta = computeEta({ confirmedAt: now, activeLoad: live.load, orderLoad: priced.loadUnits, config: live.config, extraDeliveryMinutes: point.extraMinutes, pickup: point.kind === 'PICKUP' });
-  return toQuote(priced, eta.prepMinutes + eta.deliveryMinutes);
+  return quoteFor(d, r, input, 'ONLINE_PLATFORM_FEE');
+}
+
+/** Counter pricing is available only through trusted staff authentication, never a public channel flag. */
+export async function quoteCounterOrder(restaurantId: string, input: QuoteInput, auth: AuthzSnapshot) {
+  if (!hasPermission(auth, 'orders.create', restaurantId)) throw new AppError('FORBIDDEN', 'ليس لديك صلاحية لهذا الإجراء');
+  const d = db();
+  const r = await getRestaurant(d, restaurantId);
+  if (!r) throw new AppError('NOT_FOUND', 'المحل غير موجود');
+  // Counter creation has no manual promo-code field; quotes must follow that same contract.
+  // Automatic promotions still apply through the shared pricing engine.
+  return quoteFor(d, r, { ...input, promoCode: null }, 'COUNTER_NO_FEE');
 }
 
 export interface CreatedOrder {
@@ -124,7 +145,11 @@ async function findByIdempotencyKey(d: Db, restaurantId: string, key: string) {
   return o ?? null;
 }
 
-function replay(o: typeof orders.$inferSelect, requestHash: string): CreatedOrder {
+function replay(o: typeof orders.$inferSelect, requestHash: string, opts: CreateOptions): CreatedOrder {
+  // A public key must never reveal a staff order's tracking token or bypass online pricing.
+  if (o.channel !== opts.channel || (opts.channel === 'COUNTER' && o.createdByUserId !== opts.createdByUserId)) {
+    throw new AppError('FORBIDDEN', 'Not allowed to replay this order');
+  }
   if (o.requestHash !== requestHash) {
     throw new AppError('IDEMPOTENCY_MISMATCH', 'تم استخدام نفس مفتاح الطلب لبيانات مختلفة');
   }
@@ -153,13 +178,15 @@ interface CreateOptions {
   channel: OrderChannel;
   /** Staff member entering a counter order. */
   createdByUserId?: string | null;
+  actorMeta?: { label: string; deviceId?: string | null; ip?: string | null; userAgent?: string | null };
   admit?: (tx: Db) => Promise<void>;
 }
 
 /**
  * Online orders follow every customer-facing rule (opening hours, pause, enabled payment methods,
  * minimum order, required phone). Counter orders are entered by staff for someone standing at the
- * register, so those online-only rules don't apply — but a platform suspension still does.
+ * register, so those online-only rules don't apply. Platform suspension and cash kitchen capacity
+ * still apply to both channels.
  */
 async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempotencyKey: string, now: Date, opts: CreateOptions): Promise<CreatedOrder> {
   const d = db();
@@ -167,14 +194,17 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
   const requestHash = hashRequest(input);
 
   const existing = await findByIdempotencyKey(d, r.id, idempotencyKey);
-  if (existing) return replay(existing, requestHash);
+  if (existing) return replay(existing, requestHash, opts);
 
   let phone: string | null = null;
   if (input.customerPhone) {
     phone = normalizeEgyptianPhone(input.customerPhone);
     if (!phone) throw new AppError('VALIDATION', 'رقم الموبايل غير صحيح', { field: 'customerPhone' });
   }
-  const { status, paymentStatus } = initialStatusFor(input.paymentMethod);
+  const initial = initialStatusFor(input.paymentMethod);
+  const autoAcceptCash = input.paymentMethod === 'CASH';
+  const status: OrderStatus = autoAcceptCash ? 'CONFIRMED' : initial.status;
+  const paymentStatus = initial.paymentStatus;
   const trackingToken = randomBytes(18).toString('base64url');
 
   try {
@@ -184,7 +214,7 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
       const [lockedCounter] = await tx.select().from(storeCounters).where(eq(storeCounters.restaurantId, r.id)).for('update');
       if (!lockedCounter) throw new AppError('INTERNAL', 'Restaurant counters missing');
       const concurrentOrder = await findByIdempotencyKey(tx, r.id, idempotencyKey);
-      if (concurrentOrder) return replay(concurrentOrder, requestHash);
+      if (concurrentOrder) return replay(concurrentOrder, requestHash, opts);
 
       // Recheck admission under the same per-store lock used by confirmations. A queue that
       // filled after the checkout screen opened must not silently accept another order.
@@ -201,8 +231,15 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
           .where(and(eq(restaurantPaymentMethods.restaurantId, r.id), eq(restaurantPaymentMethods.method, input.paymentMethod)));
         if (!method?.isEnabled) throw new AppError('PAYMENT_METHOD_DISABLED', 'طريقة الدفع دي مش متاحة حاليًا');
       }
-      const commissionBps = isCounter && !currentRestaurant.counterCommissionEnabled ? 0 : currentRestaurant.commissionBps;
-      const { priced, point } = await priceFor(tx, currentRestaurant, input, now, commissionBps);
+      const pricingMode: PricingMode = isCounter ? 'COUNTER_NO_FEE' : 'ONLINE_PLATFORM_FEE';
+      const { priced, point } = await priceFor(tx, currentRestaurant, input, now, pricingMode);
+      // Cash enters the kitchen immediately, so reserve its real load under the same store lock.
+      // A 5-unit kitchen accepts a fifth unit but never a simultaneous sixth one.
+      const cfg = currentLive.config;
+      if (autoAcceptCash && cfg.autoPause && (
+        (cfg.maxAcceptedLoad > 0 && currentLive.load + priced.loadUnits > cfg.maxAcceptedLoad) ||
+        (cfg.maxActiveOrders > 0 && currentLive.activeOrders + 1 > cfg.maxActiveOrders)
+      )) throw new AppError('STORE_PAUSED', closedMessage('PAUSED', 'CAPACITY'));
       if (input.promoCode && priced.promoError) throw new AppError('PROMO_INVALID', priced.promoError.message);
       if (!isCounter && priced.minOrderShortfall > 0) throw new AppError('MIN_ORDER', `الحد الأدنى للطلب ${egp(priced.minOrderAmount)} ج.م`);
       // Admission is charged only for a new valid order, under the idempotency lock.
@@ -264,6 +301,8 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
           deliveryFee: priced.deliveryFee,
           total: priced.total,
           currency: currentRestaurant.currency,
+          pricingMode: priced.pricingMode,
+          platformFeeAmount: priced.platformFeeAmount,
           commissionBps: priced.commissionBps,
           commissionAmount: priced.commissionAmount,
           merchantNet: priced.merchantNet,
@@ -271,6 +310,8 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
           promotionId: priced.promotion?.id ?? null,
           promoCode: priced.promotion?.code ?? null,
           source: input.source || null,
+          confirmedAt: autoAcceptCash ? now : null,
+          estimatedPrepStartAt: autoAcceptCash ? provisionalEta.prepStartAt : null,
           estimatedReadyAt: provisionalEta.readyAt,
           estimatedArrivalAt: provisionalEta.arrivalAt,
           createdAt: now,
@@ -319,9 +360,18 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
         toStatus: status,
         actorType: isCounter ? 'USER' : 'CUSTOMER',
         actorUserId: opts.createdByUserId ?? null,
-        data: { total: priced.total, items: priced.lines.length, source: input.source ?? null, channel: opts.channel, fulfillment: point.kind },
+        data: { total: priced.total, items: priced.lines.length, source: input.source ?? null, channel: opts.channel, fulfillment: point.kind, pricingMode: priced.pricingMode, platformFeeAmount: priced.platformFeeAmount, autoAccepted: autoAcceptCash },
         occurredAt: now,
       });
+
+      if (isCounter) {
+        await audit({
+          actor: { type: 'USER', userId: opts.createdByUserId, label: opts.actorMeta?.label },
+          action: 'order.counter_created', entity: 'order', entityId: order.id, restaurantId: r.id,
+          after: { orderNumber, total: priced.total, status, paymentMethod: input.paymentMethod, pricingMode, platformFeeAmount: priced.platformFeeAmount, fulfillment: point.kind },
+          deviceId: opts.actorMeta?.deviceId, ip: opts.actorMeta?.ip, userAgent: opts.actorMeta?.userAgent,
+        }, tx);
+      }
 
       return {
         orderId: order.id,
@@ -336,7 +386,7 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
   } catch (err) {
     if (isUniqueViolation(err, 'orders_idempotency_uq')) {
       const winner = await findByIdempotencyKey(d, r.id, idempotencyKey);
-      if (winner) return replay(winner, requestHash);
+      if (winner) return replay(winner, requestHash, opts);
     }
     throw err;
   }
@@ -353,8 +403,8 @@ export interface CounterOrderInput {
 
 /**
  * Walk-in order entered at the register. It is created like any order (same pricing, snapshots,
- * order number and event log) and then immediately accepted / marked paid by the staff member,
- * so it goes straight into the kitchen queue with a real ETA.
+ * order number and event log). Cash enters the kitchen atomically; InstaPay still waits for
+ * an explicit payment verification with the appropriate permission.
  */
 export async function createCounterOrder(
   restaurantId: string,
@@ -366,7 +416,7 @@ export async function createCounterOrder(
   const r = await getRestaurant(db(), restaurantId);
   if (!r) throw new AppError('NOT_FOUND', 'المحل غير موجود');
   if (!hasPermission(staff.auth, 'orders.create', r.id)) throw new AppError('FORBIDDEN', 'ليس لديك صلاحية لهذا الإجراء');
-  const created = await createOrderFor(
+  return createOrderFor(
     r,
     {
       items: input.items,
@@ -380,23 +430,6 @@ export async function createCounterOrder(
     },
     idempotencyKey,
     now,
-    { channel: 'COUNTER', createdByUserId: staff.userId },
+    { channel: 'COUNTER', createdByUserId: staff.userId, actorMeta: { label: staff.name, deviceId: staff.deviceId, ip: staff.ip, userAgent: staff.userAgent } },
   );
-  if (created.replayed) return created;
-  // Cash: accepted on the spot (collected at hand-over). InstaPay: the cashier saw the transfer.
-  const action = input.paymentMethod === 'CASH' ? 'ACCEPT' : 'VERIFY_PAYMENT';
-  try {
-    const result = await applyOrderAction({
-      orderId: created.orderId,
-      action,
-      actor: { type: 'USER', userId: staff.userId, label: staff.name, auth: staff.auth, deviceId: staff.deviceId, ip: staff.ip, userAgent: staff.userAgent },
-      restaurantId: r.id,
-      now,
-    });
-    return { ...created, status: result.status };
-  } catch (err) {
-    // The order exists; it simply waits on the board for someone allowed to accept / verify it.
-    if (err instanceof AppError && err.code === 'FORBIDDEN') return created;
-    throw err;
-  }
 }

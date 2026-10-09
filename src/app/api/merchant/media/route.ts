@@ -11,12 +11,15 @@ import { hasPermission } from '@/lib/domain/permissions';
 
 export const dynamic = 'force-dynamic';
 
-/** Upload one photo for a restaurant's menu (raw image body; `?restaurantId=`). Returns its public URL. */
+/** Upload a restaurant-owned photo; profile editors do not receive menu-editing permissions. */
 export const POST = route(async (req, _ctx, meta) => {
   assertSameOrigin(req);
   const auth = await requireAuth();
-  const restaurantId = z.uuid().parse(new URL(req.url).searchParams.get('restaurantId'));
-  if (!hasPermission(auth, 'menu.manage', restaurantId)) throw new AppError('FORBIDDEN', 'ليس لديك صلاحية لهذا الإجراء');
+  const query = new URL(req.url).searchParams;
+  const restaurantId = z.uuid().parse(query.get('restaurantId'));
+  const scope = z.enum(['menu', 'profile']).parse(query.get('scope') ?? 'menu');
+  const permission = scope === 'profile' ? 'store.profile' : 'menu.manage';
+  if (!hasPermission(auth, permission, restaurantId)) throw new AppError('FORBIDDEN', 'ليس لديك صلاحية لهذا الإجراء');
   await enforceRateLimit(`media:${auth.user.id}`, 60, 3600);
   const contentType = (req.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
   if (!isImageType(contentType)) throw new AppError('VALIDATION', 'الملف ليس صورة صالحة');

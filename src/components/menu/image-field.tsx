@@ -23,27 +23,30 @@ async function compress(file: File): Promise<Blob> {
 }
 
 /** Photo picker that uploads to the restaurant's media store and submits the resulting URL as `name`. */
-export function ImageField({ name, restaurantId, initial, label }: { name: string; restaurantId: string; initial: string | null; label: string }) {
+export function ImageField({ name, restaurantId, initial, label, scope = 'menu', onBusyChange, onChange }: { name: string; restaurantId: string; initial: string | null; label: string; scope?: 'menu' | 'profile'; onBusyChange?: (busy: boolean) => void; onChange?: (url: string) => void }) {
   const { t, locale } = useLanguage();
   const [url, setUrl] = useState(initial ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);
+  function changeUrl(value: string) { setUrl(value); onChange?.(value); }
 
   async function pick(file: File | undefined) {
     if (!file) return;
     setBusy(true);
+    onBusyChange?.(true);
     setError('');
     try {
       const blob = await compress(file);
-      const res = await fetch(`/api/merchant/media?restaurantId=${encodeURIComponent(restaurantId)}`, { method: 'POST', headers: { 'content-type': blob.type }, body: blob, signal: AbortSignal.timeout(30000) });
+      const res = await fetch(`/api/merchant/media?restaurantId=${encodeURIComponent(restaurantId)}&scope=${scope}`, { method: 'POST', headers: { 'content-type': blob.type }, body: blob, signal: AbortSignal.timeout(30000) });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.url) setError(data?.error?.message || t('تعذّر رفع الصورة. جرّب تاني.', "We couldn't upload the photo. Try again."));
-      else setUrl(data.url);
+      else changeUrl(data.url);
     } catch {
       setError(t('مش قادرين نقرأ الصورة. جرّب صورة تانية.', "We couldn't read that image. Try another one."));
     } finally {
       setBusy(false);
+      onBusyChange?.(false);
       if (input.current) input.current.value = '';
     }
   }
@@ -64,13 +67,13 @@ export function ImageField({ name, restaurantId, initial, label }: { name: strin
             <ImagePlus size={15} />{busy ? t('جاري الرفع…', 'Uploading…') : url ? t('تغيير الصورة', 'Change photo') : t('رفع صورة', 'Upload photo')}
             <input ref={input} type="file" accept="image/*" className="sr-only" onChange={(e) => pick(e.target.files?.[0])} disabled={busy} />
           </label>
-          {url && <button type="button" className="btn btn-ghost btn-sm text-red-700" onClick={() => setUrl('')}><Trash2 size={14} />{t('شيل الصورة', 'Remove photo')}</button>}
+          {url && <button type="button" className="btn btn-ghost btn-sm text-red-700" disabled={busy} onClick={() => changeUrl('')}><Trash2 size={14} />{t('شيل الصورة', 'Remove photo')}</button>}
         </div>
       </div>
       {error && <p className="text-xs text-red-700" role="alert">{localizeMessage(error, locale)}</p>}
       <details className="text-xs text-gray-500">
         <summary className="cursor-pointer">{t('أو حط رابط صورة', 'Or paste an image link')}</summary>
-        <input className="input mt-1" dir="ltr" value={url} onChange={(e) => setUrl(e.target.value.trim())} placeholder="https://…" aria-label={t('رابط الصورة', 'Image link')} />
+        <input className="input mt-1" dir="ltr" value={url} disabled={busy} onChange={(e) => changeUrl(e.target.value.trim())} placeholder="https://…" aria-label={t('رابط الصورة', 'Image link') + ': ' + label} />
       </details>
     </div>
   );

@@ -32,11 +32,24 @@ async function accessible(page: Page) {
 }
 
 async function transition(context: BrowserContext, restaurantId: string, orderId: string, action: string) {
+  // Read the account binding from the real authenticated board request, without a fixture-only API.
+  const probe = await context.newPage();
+  const origin = new URL(context.pages().find((page) => page !== probe)!.url()).origin;
+  await context.addCookies([{ name: 'merchant_store', value: restaurantId, url: origin }]);
+  const sync = probe.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === '/api/merchant/sync' && url.searchParams.get('restaurantId') === restaurantId;
+  });
+  await probe.goto('/merchant');
+  const actorUserId = new URL((await sync).url()).searchParams.get('actorUserId');
+  expect(actorUserId).toBeTruthy();
+  await probe.close();
   const res = await context.request.post('/api/merchant/actions', { data: {
-    restaurantId, deviceId: randomUUID(), actions: [{ eventId: randomUUID(), orderId, action, occurredAt: Date.now() }],
+    restaurantId, actorUserId, deviceId: randomUUID(), actions: [{ eventId: randomUUID(), orderId, action, occurredAt: Date.now() }],
   } });
   expect(res.ok()).toBeTruthy();
   const body = await res.json();
+  expect(body.viewerUserId).toBe(actorUserId);
   expect(body.results[0].result).toBe('applied');
 }
 

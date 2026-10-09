@@ -20,8 +20,8 @@ describe('order state machine', () => {
     }
   });
 
-  it('cash orders must be accepted first', () => {
-    expect(initialStatusFor('CASH')).toEqual({ status: 'CREATED', paymentStatus: 'CASH' });
+  it('new cash orders enter the queue and historical cash orders can still be accepted', () => {
+    expect(initialStatusFor('CASH')).toEqual({ status: 'CONFIRMED', paymentStatus: 'CASH' });
     expect(nextStatus('CREATED', 'ACCEPT')).toBe('CONFIRMED');
     expect(nextStatus('CREATED', 'START_PREPARING')).toBeNull();
   });

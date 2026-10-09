@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { staffHomePath, type AuthContext } from '@/server/auth/authz';
 import { safeInternalPath } from '@/lib/domain/misc';
 import { hasPermission, PERMISSIONS, SYSTEM_ROLES } from '@/lib/domain/permissions';
 
@@ -38,5 +39,20 @@ describe('RBAC boundaries', () => {
     const can = (key: string) => SYSTEM_ROLES.find((r) => r.key === key)!.permissions.includes('orders.create');
     expect(['MERCHANT_OWNER', 'MERCHANT_MANAGER', 'CASHIER'].every(can)).toBe(true);
     expect(['KITCHEN_STAFF', 'DELIVERY_STAFF'].some(can)).toBe(false);
+  });
+});
+
+describe('staff workspace selection', () => {
+  it('opens one combined courier screen for explicit assignments and keeps owners in the kitchen', () => {
+    const courier: AuthContext = {
+      user: { id: 'courier', name: 'Courier', email: 'courier@example.test' },
+      isPlatform: false, platformPermissions: new Set(), roleKeys: ['DELIVERY_STAFF'], storeIds: ['a', 'b'],
+      storePermissions: new Map([['a', new Set(['orders.delivery'])], ['b', new Set(['orders.delivery'])]]),
+    };
+    expect(staffHomePath(courier)).toBe('/merchant/delivery');
+    expect(hasPermission(courier, 'orders.delivery', 'unassigned')).toBe(false);
+    expect(staffHomePath({ ...courier, storePermissions: new Map([['a', new Set(['orders.delivery', 'orders.view'])]]) })).toBe('/merchant');
+    expect(staffHomePath({ ...courier, isPlatform: true, platformPermissions: new Set(['platform.users']) })).toBe('/admin');
+    expect(staffHomePath({ ...courier, storeIds: [], storePermissions: new Map() })).toBe('/merchant');
   });
 });

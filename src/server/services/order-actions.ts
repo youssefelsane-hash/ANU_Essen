@@ -1,7 +1,8 @@
 import { and, eq, lte, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import { db, isUniqueViolation } from '../db';
-import { deliveryPoints, orderEvents, orders, paymentAttachments, payments, restaurants, storeCounters } from '../db/schema';
+import { deliveryPoints, orderEvents, orders, paymentAttachments, payments, restaurants, storeCounters, users } from '../db/schema';
+import { loadAuthz } from '../auth/authz';
 import { AppError } from '../errors';
 import { log } from '../log';
 import {
@@ -83,9 +84,18 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
         throw new AppError('NOT_FOUND', 'Order not found');
       }
 
+      let authorization = input.actor.auth;
+      if (input.action === 'OUT_FOR_DELIVERY' && input.actor.type === 'USER') {
+        if (!input.actor.userId) throw new AppError('FORBIDDEN');
+        // Shares the assignment-management mutex: a claim cannot slip in after a grant removal.
+        const [user] = await tx.select().from(users).where(eq(users.id, input.actor.userId)).for('update');
+        if (!user?.isActive) throw new AppError('FORBIDDEN');
+        authorization = await loadAuthz(tx, { id: user.id, name: user.name, email: user.email });
+      }
+
       if (input.clientEventId) {
         const [dup] = await tx.select().from(orderEvents).where(eq(orderEvents.clientEventId, input.clientEventId));
-        if (dup) return duplicateResult(order, dup, input);
+        if (dup) return duplicateResult(order, dup, { ...input, actor: { ...input.actor, auth: authorization } });
       }
 
       if ((input.expectedStatus && order.status !== input.expectedStatus) ||
@@ -98,7 +108,7 @@ export async function applyOrderAction(input: ApplyActionInput): Promise<ApplyAc
         throw new AppError('INVALID_TRANSITION', `Cannot ${input.action} an order that is ${order.status}`, { current: order.status, action: input.action });
       }
       const permitted = actorMayPerform(input.actor.type, input.action, order.status, (p) =>
-        input.actor.auth ? hasPermission(input.actor.auth, p, order.restaurantId) : false,
+        authorization ? hasPermission(authorization, p, order.restaurantId) : false,
       order.fulfillment);
       if (!permitted) throw new AppError('FORBIDDEN', 'Not allowed to perform this action');
 

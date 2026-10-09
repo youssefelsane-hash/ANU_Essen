@@ -22,6 +22,7 @@ const NAV = [
   { href: '/admin/orders', ar: 'الطلبات', en: 'Orders', permission: 'platform.restaurants', icon: 'ReceiptText', primary: true },
   { href: '/admin/refunds', ar: 'الاسترداد', en: 'Refunds', permission: 'platform.restaurants', icon: 'RotateCcw', primary: true },
   { href: '/admin/qr', ar: 'QR المنصة', en: 'Platform QR', permission: 'platform.restaurants', icon: 'QrCode', primary: true },
+  { href: '/admin/delivery', ar: 'الديليفري والمحاسبة', en: 'Couriers & cash', permission: 'platform.users', icon: 'Bike', primary: true },
   { href: '/admin/finance', ar: 'العمولات والتحصيل', en: 'Finance', permission: 'platform.finance', icon: 'Wallet', primary: true },
   { href: '/admin/customers', ar: 'العملاء', en: 'Customers', permission: 'platform.restaurants', icon: 'Users', primary: false },
   { href: '/admin/users', ar: 'المستخدمون والفريق', en: 'Team members', permission: 'platform.users', icon: 'UserCog', primary: false },
@@ -45,7 +46,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <div className="admin-user">{auth.user.name}<div className="mt-1 opacity-60" dir="ltr">{auth.user.email}</div></div>
         <div className="px-5 pb-5"><LanguageSwitcher className="admin-language-switcher" /></div>
         <nav aria-label={t('إدارة المنصة', 'Platform navigation')} className="admin-navigation no-scrollbar md:overflow-y-auto">
-          <AdminNavigation items={NAV.filter(({ permission }) => auth.platformPermissions.has(permission)).map(({ href, ar, en, icon, primary }) => ({ href, ar, en, icon, primary }))} />
+          <AdminNavigation items={NAV.filter(({ permission, href }) => auth.platformPermissions.has(permission) || (href === '/admin/delivery' && auth.platformPermissions.has('platform.finance'))).map(({ href, ar, en, icon, primary }) => ({ href, ar, en, icon, primary }))} />
         </nav>
         <div className="admin-bottom flex md:block">
           <Link href="/merchant" className="admin-link"><ExternalLink size={17} strokeWidth={1.6} />{t('شاشة طلبات المطعم', 'Kitchen screen')}</Link>

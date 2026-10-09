@@ -156,7 +156,7 @@ export function paymentStatusAfter(
 
 export function initialStatusFor(method: PaymentMethod): { status: OrderStatus; paymentStatus: PaymentStatus } {
   return method === 'CASH'
-    ? { status: 'CREATED', paymentStatus: 'CASH' }
+    ? { status: 'CONFIRMED', paymentStatus: 'CASH' }
     : { status: 'AWAITING_PAYMENT', paymentStatus: 'UNPAID' };
 }
 
@@ -169,7 +169,7 @@ export function primaryActionFor(status: OrderStatus, fulfillment: Fulfillment =
     case 'PAYMENT_REVIEW':
       return 'VERIFY_PAYMENT';
     case 'CONFIRMED':
-      return 'START_PREPARING';
+      return 'MARK_READY';
     case 'PREPARING':
       return 'MARK_READY';
     case 'READY':

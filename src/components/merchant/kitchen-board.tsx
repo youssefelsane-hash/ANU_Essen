@@ -11,6 +11,9 @@ import { labels, localizedName, localizeMessage, text, type Locale } from '@/lib
 import { startOfLocalDay } from '@/lib/domain/hours';
 import type { OrderSnapshot, StoreLive } from '@/lib/types';
 import { PrintPortal } from './receipt';
+import { useScreenAwake } from './use-screen-awake';
+import { Maximize2, Minimize2, Phone, Volume2, VolumeX, Sun, Moon, Settings2 } from 'lucide-react';
+import './merchant-orders.css';
 
 interface Props {
   userId: string;
@@ -35,8 +38,8 @@ const noopSubscribe = () => () => {};
 const getEmpty = () => EMPTY;
 
 const COLUMNS: { key: string; title: string; titleEn: string; statuses: OrderStatus[]; tone: string }[] = [
-  { key: 'new', title: 'جديد', titleEn: 'New', statuses: ['CREATED', 'PAYMENT_REVIEW', 'CONFIRMED', 'AWAITING_PAYMENT'], tone: 'border-t-amber-500' },
-  { key: 'preparing', title: 'بيتحضر', titleEn: 'Preparing', statuses: ['PREPARING'], tone: 'border-t-orange-500' },
+  { key: 'kitchen', title: 'في المطبخ', titleEn: 'Kitchen', statuses: ['CREATED', 'CONFIRMED', 'PREPARING'], tone: 'border-t-orange-500' },
+  { key: 'payment', title: 'مراجعة الدفع', titleEn: 'Payments', statuses: ['PAYMENT_REVIEW', 'AWAITING_PAYMENT'], tone: 'border-t-amber-500' },
   { key: 'ready', title: 'جاهز', titleEn: 'Ready', statuses: ['READY'], tone: 'border-t-green-600' },
   { key: 'delivery', title: 'توصيل', titleEn: 'Delivery', statuses: ['OUT_FOR_DELIVERY', 'ARRIVED_AT_GATE'], tone: 'border-t-purple-600' },
 ];
@@ -50,7 +53,12 @@ const NEW_PRIORITY: Partial<Record<OrderStatus, number>> = { PAYMENT_REVIEW: 0, 
 function useChime() {
   const ctxRef = useRef<AudioContext | null>(null);
   const [enabled, setEnabled] = useState(false);
-  const wakeLock = useRef<{ release: () => Promise<void> } | null>(null);
+  const [preferred, setPreferred] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    try { setPreferred(localStorage.getItem('merchant:sound-enabled') === '1'); } catch { /* private browsing */ }
+    return () => { const ctx = ctxRef.current; if (ctx) { ctx.onstatechange = null; void ctx.close().catch(() => {}); } };
+  }, []);
 
   const play = useCallback(() => {
     const ctx = ctxRef.current;
@@ -71,28 +79,27 @@ function useChime() {
   }, []);
 
   const enable = useCallback(async () => {
+    setFailed(false);
     try {
+      if (ctxRef.current?.state === 'running') {
+        await ctxRef.current.suspend();
+        setEnabled(false);
+        setPreferred(false);
+        try { localStorage.setItem('merchant:sound-enabled', '0'); } catch { /* private browsing */ }
+        return;
+      }
       ctxRef.current ??= new AudioContext();
-      await ctxRef.current.resume();
-      setEnabled(true);
+      const ctx = ctxRef.current;
+      ctx.onstatechange = () => setEnabled(ctx.state === 'running');
+      await ctx.resume();
+      setEnabled(ctx.state === 'running');
+      setPreferred(true);
+      try { localStorage.setItem('merchant:sound-enabled', '1'); } catch { /* private browsing */ }
       play();
-    } catch {
-      /* audio unavailable */
-    }
-    try {
-      if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission();
-    } catch {
-      /* ignore */
-    }
-    try {
-      const nav = navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<{ release: () => Promise<void> }> } };
-      wakeLock.current = (await nav.wakeLock?.request('screen')) ?? null;
-    } catch {
-      /* keep-awake not supported */
-    }
+    } catch { setEnabled(false); setFailed(true); }
   }, [play]);
 
-  return { enabled, enable, play };
+  return { enabled, preferred, failed, enable, play };
 }
 
 function ago(ms: number, locale: Locale) {
@@ -117,7 +124,27 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
   const [now, setNow] = useState(() => Date.now());
   const deliveryOnly = permissions.includes('orders.delivery') && !permissions.includes('orders.view') && !permissions.includes('orders.kitchen');
   const columns = deliveryOnly ? DELIVERY_COLUMNS : COLUMNS;
-  const [tab, setTab] = useState(deliveryOnly ? 'ready' : 'new');
+  const [tab, setTab] = useState(deliveryOnly ? 'ready' : 'kitchen');
+  const awake = useScreenAwake();
+  const [focus, setFocus] = useState(false);
+  const boardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    document.body.classList.toggle('merchant-focus-mode', focus);
+    return () => document.body.classList.remove('merchant-focus-mode');
+  }, [focus]);
+  const toggleFocus = async () => {
+    const next = !focus;
+    setFocus(next);
+    try {
+      if (next) await boardRef.current?.requestFullscreen?.();
+      else if (document.fullscreenElement === boardRef.current) await document.exitFullscreen();
+    } catch { /* Focus layout remains useful where fullscreen is unavailable. */ }
+  };
+  useEffect(() => {
+    const onFullscreen = () => { if (!document.fullscreenElement) setFocus(false); };
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => document.removeEventListener('fullscreenchange', onFullscreen);
+  }, []);
   const [showUnpaid, setShowUnpaid] = useState(false);
   const [reasonFor, setReasonFor] = useState<{ order: OrderSnapshot; action: 'CANCEL' | 'REJECT_PAYMENT' } | null>(null);
   const [printing, setPrinting] = useState<OrderSnapshot | null>(null);
@@ -127,9 +154,11 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
 
   useEffect(() => {
     const e = new MerchantEngine(restaurant.id, userId, perms, (o) => alertRef.current(o), () => localeRef.current);
+    let disposed = false;
+    setStartError(null);
     setEngine(e);
-    e.start().catch((err) => setStartError(String(err?.message ?? err)));
-    return () => e.stop();
+    e.start().catch((err) => { if (!disposed) setStartError(String(err?.message ?? err)); });
+    return () => { disposed = true; e.stop(); };
   }, [restaurant.id, userId, perms]);
 
   useEffect(() => {
@@ -143,7 +172,7 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
     try {
       navigator.vibrate?.([200, 100, 200]);
       if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
-        for (const o of orders.slice(0, 3)) new Notification(`${t('طلب', 'Order')} #${o.orderNumber} — ${copy.status[o.status]}`, { body: `${o.customerName} • ${formatMoney(o.total, locale)}`, tag: o.id });
+        for (const o of orders.slice(0, 3)) new Notification(`${t('طلب', 'Order')} #${o.orderNumber} — ${copy.status[o.status]}`, { body: `${o.channel === 'COUNTER' && o.customerName === 'عميل المحل' ? t('عميل المحل', 'Walk-in customer') : o.customerName} • ${formatMoney(o.total, locale)}`, tag: o.id });
       }
     } catch {
       /* ignore */
@@ -201,7 +230,7 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
   }
 
   return (
-    <div className="flex min-h-[calc(100dvh-120px)] flex-col">
+    <div ref={boardRef} className={'merchant-board flex min-h-[calc(100dvh-120px)] flex-col ' + (focus ? 'is-focus ' : '') + (deliveryOnly ? 'is-courier' : '')}>
       <TopBar
         state={state}
         canCreateOrders={perms.has('orders.create')}
@@ -210,6 +239,11 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
         onStore={(s) => engine?.setStore(s)}
         soundEnabled={chime.enabled}
         enableSound={chime.enable}
+        soundPreferred={chime.preferred}
+        soundFailed={chime.failed}
+        awake={awake}
+        focus={focus}
+        toggleFocus={toggleFocus}
         paper={paper}
         setPaper={(w) => {
           setPaperWidth(w);
@@ -240,35 +274,41 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
       )}
 
       {showCourierStrip && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 bg-purple-50 px-4 py-2 text-sm text-purple-950">
-          <span>🛵 {t('معك الآن', 'With you now')}: <b>{onTheWay.length}</b> {t('طلب', 'orders')}</span>
-          <span>{t('كاش للتحصيل', 'Cash to collect')}: <b>{formatMoney(toCollect, locale)}</b></span>
-          <span className="text-purple-700">{t('تم تسليمه اليوم', 'Delivered today')}: <b>{deliveredToday.length}</b> · {t('كاش تم تحصيله', 'Cash collected')} <b>{formatMoney(cashCollected, locale)}</b></span>
+        <div className="merchant-courier-totals">
+          <div><small>{t('معك في الطريق', 'With you now')}</small><b>{onTheWay.length} {t('طلب', 'orders')}</b></div>
+          <div><small>{t('كاش مطلوب تحصيله', 'Cash to collect')}</small><b>{formatMoney(toCollect, locale)}</b></div>
+          <details><summary className="cursor-pointer py-1 text-sm">{t('تسليمات اليوم', 'Today’s deliveries')}</summary><p className="mt-2 text-sm">{deliveredToday.length} {t('طلب تم تسليمه', 'delivered')} · {t('كاش تم تحصيله', 'Cash collected')}: {formatMoney(cashCollected, locale)}</p></details>
         </div>
       )}
 
+      {highlightedCount > 0 && <div className="merchant-new-orders" role="status"><span>{t(`${highlightedCount} طلب محتاج انتباهك`, `${highlightedCount} orders need your attention`)}</span><button className="btn btn-secondary btn-sm" onClick={() => {
+        const highlighted = active.find((o) => state.highlighted[o.id]);
+        const target = columns.find((c) => highlighted && c.statuses.includes(highlighted.status));
+        if (target) setTab(target.key);
+      }}>{t('عرض الطلبات', 'View orders')}</button></div>}
+
       {/* Mobile tabs */}
-      <div className="no-scrollbar flex gap-1 overflow-x-auto bg-white px-2 py-2 shadow-sm lg:hidden">
+      <div className={'merchant-order-tabs ' + (deliveryOnly ? 'is-courier' : '')} role="group" aria-label={t('مراحل الطلبات', 'Order stages')}>
         {columns.map((c) => (
-          <button key={c.key} className={`btn btn-sm shrink-0 ${tab === c.key ? 'btn-dark' : 'btn-ghost'}`} onClick={() => setTab(c.key)}>
-            {t(c.title, c.titleEn)} ({columnOrders(c.statuses).length})
+          <button key={c.key} className={tab === c.key ? 'is-selected' : ''} aria-pressed={tab === c.key} onClick={() => setTab(c.key)}>
+            <span>{t(c.title, c.titleEn)}</span><b>{columnOrders(c.statuses).length}</b>
           </button>
         ))}
       </div>
 
       {!state.ready ? (
-        <div className={`grid flex-1 gap-3 p-3 ${deliveryOnly ? 'lg:grid-cols-2' : 'lg:grid-cols-4'}`}>
+        <div className={'merchant-board-grid flex-1 ' + (deliveryOnly ? 'is-courier' : '')}>
           {columns.map((c) => <div key={c.key} className="skeleton h-64" />)}
         </div>
       ) : (
-        <div className={`grid flex-1 gap-3 p-3 ${deliveryOnly ? 'lg:grid-cols-2' : 'lg:grid-cols-4'}`}>
+        <div className={'merchant-board-grid flex-1 ' + (deliveryOnly ? 'is-courier' : '')}>
           {columns.map((c) => {
             const list = columnOrders(c.statuses);
-            const unpaid = c.key === 'new' ? list.filter((o) => o.status === 'AWAITING_PAYMENT') : [];
-            const shown = c.key === 'new' ? list.filter((o) => o.status !== 'AWAITING_PAYMENT') : list;
+            const unpaid = c.key === 'payment' ? list.filter((o) => o.status === 'AWAITING_PAYMENT') : [];
+            const shown = c.key === 'payment' ? list.filter((o) => o.status !== 'AWAITING_PAYMENT') : list;
             return (
-              <section key={c.key} className={`${tab === c.key ? 'flex' : 'hidden'} min-h-0 flex-col rounded-2xl border-t-4 bg-gray-100 ${c.tone} lg:flex`}>
-                <h2 className="flex items-center justify-between px-3 py-2 text-lg font-extrabold">
+              <section key={c.key} className={`merchant-order-column ${tab === c.key ? 'block' : 'hidden'} ${c.tone}`}>
+                <h2 className="merchant-column-heading">
                   {t(c.title, c.titleEn)}
                   <span className="badge bg-white text-gray-800">{shown.length}</span>
                 </h2>
@@ -285,7 +325,7 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
                     </button>
                   </div>
                 )}
-                <div className="flex-1 space-y-3 overflow-y-auto px-2 pb-3">
+                <div className="merchant-column-content">
                   {shown.map((o) => (
                     <OrderCard
                       key={o.id}
@@ -301,7 +341,7 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
                       onSeen={() => engine?.unhighlight(o.id)}
                     />
                   ))}
-                  {shown.length === 0 && unpaid.length === 0 && <p className="py-8 text-center text-sm text-gray-400">{t('لا يوجد', 'No orders')}</p>}
+                  {shown.length === 0 && unpaid.length === 0 && <p className="merchant-empty-orders">{t('لا يوجد', 'No orders')}</p>}
                   {unpaid.length > 0 && (
                     <div className="rounded-xl bg-white/60 p-2">
                       <button className="btn btn-ghost btn-sm w-full justify-between" onClick={() => setShowUnpaid((v) => !v)}>
@@ -341,9 +381,9 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
           <summary className="cursor-pointer text-sm font-bold">{t('آخر الطلبات المنتهية', 'Recent finished orders')} ({recentDone.length})</summary>
           <div className="mt-2 divide-y divide-gray-100">
             {recentDone.map((o) => (
-              <div key={o.id} className="flex items-center justify-between gap-2 py-2 text-sm">
+              <div key={o.id} className="merchant-finished-row">
                 <span className="font-bold" dir="ltr">#{o.orderNumber}</span>
-                <span className="flex-1 truncate">{o.customerName}</span>
+                <span className="flex-1 truncate">{o.channel === 'COUNTER' && o.customerName === 'عميل المحل' ? t('عميل المحل', 'Walk-in customer') : o.customerName}</span>
                 <span className={`badge ${o.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'}`}>{copy.status[o.status]}</span>
                 <span>{formatMoney(o.total, locale)}</span>
                 {perms.has('receipts.print') && <button className="btn btn-secondary btn-sm" onClick={() => setPrinting(o)}>🖨️ {t('إعادة طباعة', 'Reprint')}</button>}
@@ -370,16 +410,9 @@ export function KitchenBoard({ restaurant, permissions, userId }: Props) {
 }
 
 function TopBar({
-  state,
-  canCreateOrders,
-  restaurantId,
-  canChangeStatus,
-  onStore,
-  soundEnabled,
-  enableSound,
-  paper,
-  setPaper,
-  onSync,
+  state, canCreateOrders, restaurantId, canChangeStatus, onStore,
+  soundEnabled, soundPreferred, soundFailed, enableSound, awake, focus, toggleFocus,
+  paper, setPaper, onSync,
 }: {
   state: EngineState;
   canCreateOrders: boolean;
@@ -387,7 +420,12 @@ function TopBar({
   canChangeStatus: boolean;
   onStore: (s: StoreLive) => void;
   soundEnabled: boolean;
+  soundPreferred: boolean;
+  soundFailed: boolean;
   enableSound: () => void;
+  awake: ReturnType<typeof useScreenAwake>;
+  focus: boolean;
+  toggleFocus: () => void;
   paper: PaperWidth;
   setPaper: (w: PaperWidth) => void;
   onSync: () => void;
@@ -400,8 +438,8 @@ function TopBar({
   const conn = {
     online: { text: t('متصل', 'Connected'), tone: 'bg-green-100 text-green-800', dot: 'bg-green-500' },
     synced: { text: t('تم حفظ التحديثات', 'Updates saved'), tone: 'bg-green-100 text-green-800', dot: 'bg-green-500' },
-    syncing: { text: t('جاري حفظ التحديثات…', 'Saving updates…'), tone: 'bg-blue-100 text-blue-800', dot: 'bg-blue-500 animate-pulse' },
-    offline: { text: t('بدون إنترنت — الطلبات محفوظة', 'Offline — orders are saved'), tone: 'bg-amber-100 text-amber-900', dot: 'bg-amber-500' },
+    syncing: { text: t('جاري الحفظ…', 'Saving…'), tone: 'bg-blue-100 text-blue-800', dot: 'bg-blue-500 animate-pulse' },
+    offline: { text: t('بدون إنترنت · محفوظ على الجهاز', 'Offline · saved on device'), tone: 'bg-amber-100 text-amber-900', dot: 'bg-amber-500' },
   }[state.connectivity];
   const levelTone = { NORMAL: 'bg-green-600', BUSY: 'bg-amber-500', HEAVY: 'bg-red-600', FULL: 'bg-red-700' };
 
@@ -410,66 +448,43 @@ function TopBar({
     setStatusError(null);
     try {
       const res = await fetch('/api/merchant/store-status', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ restaurantId, status }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ restaurantId, status }),
       });
       const data = (await res.json()) as { store?: StoreLive; error?: { message: string } };
       if (res.ok && data.store) onStore(data.store);
       else setStatusError(localizeMessage(data.error?.message ?? t('تعذر التغيير', 'Could not change the status'), locale));
-    } catch {
-      setStatusError(t('اتصل بالإنترنت لتغيير حالة المطعم.', 'Connect to the internet to change the restaurant status.'));
-    } finally {
-      setBusy(false);
-    }
+    } catch { setStatusError(t('اتصل بالإنترنت لتغيير حالة المطعم.', 'Connect to the internet to change the restaurant status.')); }
+    finally { setBusy(false); }
   }
 
-  return (
-    <div className="space-y-3 border-b border-gray-200 bg-white px-3 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          {store && <span className={`badge text-sm ${store.status === 'OPEN' ? 'bg-green-100 text-green-800' : store.status === 'BUSY' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-700'}`}>{copy.storeStatus[store.status]}</span>}
-          {canChangeStatus && store && store.reason !== 'INACTIVE' && (
-            <div className="flex overflow-hidden rounded-xl ring-1 ring-gray-300" role="group" aria-label={t('استقبال الطلبات', 'Order availability')}>
-              {(['OPEN', 'PAUSED', 'CLOSED'] as const).map((s) => (
-                <button key={s} disabled={busy || state.connectivity === 'offline'} aria-pressed={store.orderingStatus === s} onClick={() => setStatus(s)} className={`min-h-11 px-4 py-2 text-sm font-bold ${store.orderingStatus === s ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`}>
-                  {s === 'OPEN' ? t('✓ استقبال', '✓ Accept orders') : s === 'PAUSED' ? t('Ⅱ توقف مؤقت', 'Ⅱ Pause') : t('× إغلاق', '× Close')}
-                </button>
-              ))}
-            </div>
-          )}
+  return <div className="merchant-order-toolbar">
+    <div className="merchant-compact-toolbar">
+      {store && <span className={`badge ${store.status === 'OPEN' ? 'bg-green-100 text-green-800' : store.status === 'BUSY' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-700'}`}>{copy.storeStatus[store.status]}</span>}
+      <button className={`badge merchant-connection ${conn.tone}`} onClick={onSync} aria-label={t('تحديث الطلبات الآن', 'Refresh orders now')} title={conn.text}><span className={`size-2 shrink-0 rounded-full ${conn.dot}`} /><span>{state.connectivity === 'offline' ? t('بلا إنترنت', 'Offline') : state.connectivity === 'syncing' ? t('مزامنة…', 'Syncing…') : t('متصل', 'Connected')}</span>{state.outboxCount > 0 && <b>{state.outboxCount}</b>}</button>
+      <button className={'merchant-tool-button ' + (soundEnabled ? 'sound-on' : 'sound-off')} aria-label={soundEnabled ? t('كتم صوت الطلبات', 'Mute order sound') : t('تشغيل صوت الطلبات', 'Enable order sound')} title={soundEnabled ? t('الصوت شغّال', 'Sound on') : t('تشغيل صوت الطلبات', 'Enable order sound')} aria-pressed={soundEnabled} onClick={enableSound}>{soundEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}</button>
+      <button className="merchant-tool-button" aria-label={focus ? t('رجوع للشاشة العادية', 'Exit focus view') : t('عرض كبير للطلبات', 'Large order view')} title={focus ? t('رجوع', 'Exit focus') : t('عرض كبير', 'Large view')} aria-pressed={focus} onClick={toggleFocus}>{focus ? <Minimize2 size={20} /> : <Maximize2 size={20} />}</button>
+      <details className="merchant-tools-menu">
+        <summary className="merchant-tool-button" aria-label={t('الصوت والشاشة وإعدادات التشغيل', 'Sound, display and workspace settings')} title={t('الصوت والشاشة', 'Sound and display')}><Settings2 size={20} /></summary>
+        <div className="merchant-tools-panel">
+          <h2 className="mb-3 text-base font-bold">{t('الصوت والشاشة', 'Sound and display')}</h2>
+          <div className="merchant-device-controls" role="group" aria-label={t('الصوت والشاشة', 'Sound and display')}>
+            <button className={'btn ' + (soundEnabled ? 'btn-secondary' : 'btn-primary')} aria-pressed={soundEnabled} onClick={enableSound}>{soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}{soundEnabled ? t('الصوت شغّال', 'Sound on') : soundPreferred ? t('شغّل الصوت هنا', 'Resume sound here') : t('شغّل صوت الطلبات', 'Enable order sound')}</button>
+            <button className="btn btn-secondary" aria-pressed={awake.active} disabled={awake.supported !== true} onClick={awake.toggle}>{awake.active ? <Sun size={18} /> : <Moon size={18} />}{awake.active ? t('الشاشة هتفضل مفتوحة', 'Screen stays awake') : awake.wanted ? t('إعادة تثبيت الشاشة', 'Keep screen awake again') : t('خلي الشاشة مفتوحة', 'Keep screen awake')}</button>
+          </div>
+          {soundFailed && <p className="mt-2 text-xs text-amber-800" role="status">{t('المتصفح لم يسمح بالصوت. اضغط تفعيل الصوت مرة أخرى.', 'The browser could not enable sound. Tap the sound button again.')}</p>}
+          {awake.supported === false && <p className="mt-2 text-xs text-gray-500">{t('تثبيت الشاشة غير مدعوم هنا. تقدر تطوّل وقت قفل الشاشة من إعدادات الهاتف.', 'Keeping the screen awake is unavailable here. Increase the screen timeout in your phone settings.')}</p>}
+          {awake.failed && <p className="mt-2 text-xs text-amber-800" role="status">{t('الهاتف لم يسمح بتثبيت الشاشة. جرّب الزر مرة أخرى، وراجع وضع توفير البطارية.', 'The phone could not keep the screen awake. Try again and check battery-saving mode.')}</p>}
+          {awake.wanted && !awake.active && !awake.failed && <p className="mt-2 text-xs text-amber-800" role="status">{t('الشاشة مش مثبتة حاليًا؛ فعّلها تاني لو الهاتف وقفها.', 'The screen is not currently kept awake; enable it again if the phone released it.')}</p>}
+          {store && <p className="mt-4 text-sm text-gray-600">{t('ضغط المطبخ', 'Kitchen workload')}: {copy.loadLevel[store.level]} · {t(`الطلب الجديد حوالي ${store.etaMinutes} دقيقة`, `New orders take about ${store.etaMinutes} min`)}</p>}
+          {canChangeStatus && store && store.reason !== 'INACTIVE' && <div className="mt-4"><label className="label">{t('استقبال الطلبات', 'Order availability')}</label><div className="merchant-availability" role="group" aria-label={t('استقبال الطلبات', 'Order availability')}>{(['OPEN', 'PAUSED', 'CLOSED'] as const).map((status) => <button key={status} disabled={busy || state.connectivity === 'offline'} aria-pressed={store.orderingStatus === status} onClick={() => setStatus(status)} className={store.orderingStatus === status ? 'bg-gray-900 text-white' : 'bg-white'}>{status === 'OPEN' ? t('✓ استقبال', '✓ Open') : status === 'PAUSED' ? t('Ⅱ توقف مؤقت', 'Ⅱ Pause') : t('× إغلاق', '× Close')}</button>)}</div></div>}
+          <label className="mt-4 block"><span className="label">{t('عرض ورق الطابعة', 'Printer paper width')}</span><select className="input" value={paper} onChange={(e) => setPaper(e.target.value as PaperWidth)}><option value="80">{t('80 مم', '80 mm')}</option><option value="58">{t('58 مم', '58 mm')}</option></select></label>
+          {state.lastSyncAt && <p className="mt-3 text-xs text-gray-500">{t('آخر تحديث', 'Last updated')}: {formatTime(state.lastSyncAt, Intl.DateTimeFormat().resolvedOptions().timeZone, locale)}</p>}
         </div>
-        {canCreateOrders && <a href="/merchant/new-order" className="btn btn-dark btn-sm">➕ {t('طلب جديد من الكاشير', 'New counter order')}</a>}
-        {!soundEnabled ? <button className="btn btn-primary btn-sm" onClick={enableSound}>🔔 {t('تفعيل صوت الطلبات', 'Enable order sound')}</button> : <span className="badge bg-green-100 text-green-800">🔔 {t('الصوت مفعّل', 'Sound enabled')}</span>}
-      </div>
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <button className={`badge ${conn.tone} min-h-9 px-3 py-1.5`} onClick={onSync} title={t('تحديث الطلبات الآن', 'Refresh orders now')}>
-          <span className={`size-2 rounded-full ${conn.dot}`} />
-          {conn.text}
-          {state.outboxCount > 0 && <span>· {t(`${state.outboxCount} تحديث ينتظر الإنترنت`, `${state.outboxCount} updates awaiting connection`)}</span>}
-        </button>
-        {store && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-gray-500">{t('ضغط المطبخ', 'Kitchen workload')}</span>
-            <span className={`badge text-white ${levelTone[store.level]}`}>{copy.loadLevel[store.level]}</span>
-            <span className="text-gray-500">{t(`حوالي ${store.etaMinutes} دقيقة للطلب الجديد`, `About ${store.etaMinutes} min for a new order`)}</span>
-          </div>
-        )}
-        <details className="ms-auto relative">
-          <summary className="cursor-pointer rounded-lg px-3 py-2 text-gray-600">🖨️ {t('إعدادات الطباعة', 'Print settings')}</summary>
-          <div className="absolute end-0 top-full z-20 mt-2 w-56 rounded-xl bg-white p-3 shadow-lg ring-1 ring-gray-200">
-            <label className="label" htmlFor="receipt-paper">{t('عرض ورق الطابعة', 'Printer paper width')}</label>
-            <select id="receipt-paper" className="input" value={paper} onChange={(e) => setPaper(e.target.value as PaperWidth)}>
-              <option value="80">{t('80 مم', '80 mm')}</option>
-              <option value="58">{t('58 مم', '58 mm')}</option>
-            </select>
-            {state.lastSyncAt && <p className="mt-2 text-xs text-gray-500">{t('آخر تحديث', 'Last updated')}: {formatTime(state.lastSyncAt, Intl.DateTimeFormat().resolvedOptions().timeZone, locale)}</p>}
-          </div>
-        </details>
-      </div>
-      {statusError && <p role="alert" className="text-sm text-red-600">{statusError}</p>}
+      </details>
     </div>
-  );
+    {canChangeStatus && store && store.orderingStatus !== 'OPEN' && store.reason !== 'INACTIVE' && <button className="btn btn-primary mt-3 w-full" disabled={busy || state.connectivity === 'offline'} onClick={() => setStatus('OPEN')}>{t('فتح استقبال الطلبات', 'Open ordering')}</button>}
+    {statusError && <p role="alert" className="mt-2 text-sm text-red-600">{statusError}</p>}
+  </div>;
 }
 
 function OrderCard({
@@ -490,7 +505,7 @@ function OrderCard({
   highlighted: boolean;
   perms: ReadonlySet<string>;
   timezone: string;
-  onAction: (o: OrderSnapshot, a: OrderAction) => void;
+  onAction: (o: OrderSnapshot, a: OrderAction) => Promise<boolean>;
   onReason: (a: 'CANCEL' | 'REJECT_PAYMENT') => void;
   onPrint: () => void;
   onSeen: () => void;
@@ -500,128 +515,48 @@ function OrderCard({
   const pickup = o.fulfillment === 'PICKUP';
   const primary = primaryActionFor(o.status, o.fulfillment);
   const primaryDef = primary ? transitionFor(primary, o.fulfillment) : null;
-  const canPrimary = !!primaryDef && perms.has(primaryDef.permission);
+  const canPrimary = !!primaryDef && (perms.has(primaryDef.permission) || perms.has('*'));
   const kitchenPhase = o.status === 'CONFIRMED' || o.status === 'PREPARING';
   const readyIn = o.estimatedReadyAt ? o.estimatedReadyAt - now : null;
   const arriveIn = o.estimatedArrivalAt ? o.estimatedArrivalAt - now : null;
   const primaryTone =
     primary === 'VERIFY_PAYMENT' || primary === 'ACCEPT' ? 'btn-success' : primary === 'MARK_READY' ? 'btn-success' : primary === 'COMPLETE' ? 'btn-dark' : 'btn-primary';
 
-  return (
-    <article
-      onClick={onSeen}
-      className={`rounded-2xl bg-white p-3 shadow-sm ring-1 ${highlighted ? 'ring-4 ring-amber-400' : 'ring-gray-200'} ${o.status === 'AWAITING_PAYMENT' ? 'opacity-75' : ''}`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="text-3xl leading-none font-black" dir="ltr">#{o.orderNumber}</div>
-          <div className="mt-1 text-xs text-gray-500">{ago(now - o.createdAt, locale)} • {formatTime(o.createdAt, timezone, locale)}</div>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          {highlighted && <span className="badge bg-amber-400 text-black">{t('جديد!', 'New!')}</span>}
-          <span className={`badge ${pickup ? 'bg-orange-100 text-orange-900' : 'bg-sky-100 text-sky-900'}`}>
-            {pickup ? t('🏪 استلام من المحل', '🏪 Pickup at counter') : t('🛵 توصيل', '🛵 Delivery')}
-            {o.channel === 'COUNTER' ? t(' · كاشير', ' · Counter') : ''}
-          </span>
-          <span className={`badge ${PAYMENT_STATUS_TONE[o.paymentStatus]}`}>
-            {copy.paymentMethod[o.paymentMethod]} • {copy.paymentStatus[o.paymentStatus]}
-          </span>
-          {pending > 0 && <span className="badge bg-blue-100 text-blue-800">{t('⏳ لم يُزامن بعد', '⏳ Saved on this device')}</span>}
-        </div>
-      </div>
+  const [saving, setSaving] = useState(false);
+  const primaryLabel = primary === 'MARK_READY' ? t('الطلب جاهز ✓', 'Order ready ✓') : primary === 'OUT_FOR_DELIVERY' ? t('استلام الطلب وبدء التوصيل', 'Collect & start delivery') : primary === 'MARK_ARRIVED' ? t('وصلت لنقطة الاستلام', 'Arrived at collection point') : primary === 'COMPLETE' ? pickup ? t('سلّمت الطلب للعميل ✓', 'Handed to customer ✓') : t('سلّمت الطلب وحصّلت الحساب ✓', 'Delivered & settled ✓') : primary ? copy.action[primary] : '';
 
-      <div className="mt-2 flex items-center justify-between">
-        <span className="text-lg font-bold">{o.customerName}</span>
-        {o.customerPhone && (
-          <a href={`tel:${o.customerPhone}`} className="text-sm text-blue-700" dir="ltr" onClick={(e) => e.stopPropagation()}>{o.customerPhone}</a>
-        )}
-      </div>
-
-      <ul className="mt-2 space-y-1 border-y border-dashed border-gray-200 py-2">
-        {o.items.map((it) => (
-          <li key={it.id}>
-            <span className="text-lg font-black">{it.quantity} ×</span> <span className="text-base font-semibold">{localizedName(locale, it.nameAr, it.nameEn)}</span>
-            {it.variantNameAr && <span className="text-sm text-gray-600"> ({localizedName(locale, it.variantNameAr, it.variantNameEn)})</span>}
-            {it.addons.length > 0 && <div className="ps-6 text-sm text-gray-600">+ {it.addons.map((a) => localizedName(locale, a.nameAr, a.nameEn)).join(locale === 'ar' ? '، ' : ', ')}</div>}
-            {it.note && <div className="ps-6 text-sm text-orange-700">* {it.note}</div>}
-          </li>
-        ))}
-      </ul>
-      {o.customerNote && <p className="mt-2 rounded-lg bg-yellow-50 p-2 text-sm text-yellow-900">📝 {o.customerNote}</p>}
-
-      <div className="mt-2 grid grid-cols-2 gap-1 text-sm">
-        <span className="text-gray-500">{t('الإجمالي', 'Total')}</span>
-        <span className="text-end font-bold">{formatMoney(o.total, locale)}</span>
-        <span className="text-gray-500">{t('الاستلام', 'Pickup point')}</span>
-        <span className="truncate text-end">{localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}</span>
-        {o.paymentReference && (
-          <>
-            <span className="text-gray-500">{t('رقم العملية', 'Transfer reference')}</span>
-            <span className="text-end font-mono" dir="ltr">{o.paymentReference}</span>
-          </>
-        )}
-        {o.assignedToName && (
-          <>
-            <span className="text-gray-500">{t('الدليفري', 'Courier')}</span>
-            <span className="text-end">{o.assignedToName}</span>
-          </>
-        )}
-      </div>
-
-      {(o.status === 'READY' || o.status === 'OUT_FOR_DELIVERY' || o.status === 'ARRIVED_AT_GATE') &&
-        (o.paymentMethod === 'CASH' && o.paymentStatus !== 'PAYMENT_VERIFIED' ? (
-          <div className="mt-2 rounded-xl bg-amber-100 px-3 py-2 text-center text-lg font-black text-amber-900">{t(`حصّل ${formatMoney(o.total, locale)} كاش`, `Collect ${formatMoney(o.total, locale)} cash`)}</div>
-        ) : (
-          <div className="mt-2 rounded-xl bg-green-50 px-3 py-1.5 text-center text-sm font-bold text-green-800">{t('مدفوع ✓ — متحصّلش فلوس', 'Paid ✓ — no cash to collect')}</div>
-        ))}
-      {o.hasPaymentAttachment && perms.has('payments.verify') && (
-        <a href={`/api/merchant/orders/${o.id}/attachment`} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm text-blue-700 underline" onClick={(e) => e.stopPropagation()}>
-          📎 {t('صورة التحويل', 'Payment proof')}
-        </a>
-      )}
-      {o.status === 'AWAITING_PAYMENT' && <p className="mt-1 text-xs text-gray-500">{t('العميل لسه ما ضغطش «تم التحويل». لو التحويل وصلك فعلًا تقدر تأكده.', 'Waiting for the customer to confirm the transfer. Verify only when you have received it.')}</p>}
-
-      {kitchenPhase && readyIn !== null && (
-        <div className={`mt-2 rounded-xl px-3 py-2 text-center font-mono text-xl font-black ${readyIn >= 0 ? 'bg-orange-50 text-orange-800' : 'bg-red-100 text-red-700'}`} dir="ltr">
-          {readyIn >= 0 ? t(`جاهز خلال ${mmss(readyIn)}`, `Ready in ${mmss(readyIn)}`) : t(`متأخر ${mmss(readyIn)}`, `Late by ${mmss(readyIn)}`)}
-        </div>
-      )}
-      {o.status === 'CONFIRMED' && !o.estimatedReadyAt && <div className="mt-2 text-center text-xs text-gray-500">{t('الوقت المتوقع هيتحسب بعد المزامنة', 'The estimated time will appear after syncing')}</div>}
-      {(o.status === 'READY' || o.status === 'OUT_FOR_DELIVERY') && arriveIn !== null && (
-        <div className="mt-2 text-center text-sm text-gray-600" dir="ltr">{t('وصول متوقع خلال', 'Customer arrival in')}: {arriveIn >= 0 ? mmss(arriveIn) : `+${mmss(arriveIn)}`}</div>
-      )}
-
-      {canPrimary && primary && (
-        <button
-          className={`btn btn-lg mt-3 w-full text-lg ${primaryTone}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onAction(o, primary);
-          }}
-        >
-          {pickup && primary === 'COMPLETE' ? t('سلّم للعميل ✓', 'Handed to customer ✓') : copy.action[primary]}
-          {primary === 'VERIFY_PAYMENT' ? ` (${formatMoney(o.total, locale)})` : ''}
-        </button>
-      )}
-      <details className="mt-2" onClick={(e) => e.stopPropagation()}>
-        <summary className="cursor-pointer rounded-lg px-2 py-2 text-sm font-semibold text-gray-600">{t('خيارات أخرى', 'More options')}</summary>
-        <div className="mt-2 flex flex-wrap gap-2">
-        {o.status === 'PAYMENT_REVIEW' && perms.has('payments.verify') && (
-          <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); onReason('REJECT_PAYMENT'); }}>{t('رفض التحويل', 'Reject payment')}</button>
-        )}
-        {o.status === 'OUT_FOR_DELIVERY' && perms.has('orders.delivery') && (
-          <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); onAction(o, 'COMPLETE'); }}>{t('تم التسليم مباشرة', 'Delivered directly')}</button>
-        )}
-        {perms.has('receipts.print') && (
-          <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); onPrint(); }}>{t('🖨️ طباعة', '🖨️ Print')}</button>
-        )}
-        {perms.has('orders.cancel') && (
-          <button className="btn btn-ghost btn-sm text-red-600" onClick={(e) => { e.stopPropagation(); onReason('CANCEL'); }}>{t('إلغاء', 'Cancel')}</button>
-        )}
-        </div>
-      </details>
-    </article>
-  );
+  return <article onClick={onSeen} className={'merchant-order-card ' + (kitchenPhase ? 'is-kitchen ' : '') + (highlighted ? 'is-new ' : '') + (o.status === 'AWAITING_PAYMENT' ? 'is-unpaid' : '')} aria-label={t('طلب رقم ', 'Order ') + o.orderNumber}>
+    <div className="merchant-order-heading">
+      <div><div className="merchant-order-number" dir="ltr">#{o.orderNumber}</div><div className="merchant-order-age mt-2 text-xs text-gray-500">{ago(now - o.createdAt, locale)} · {formatTime(o.createdAt, timezone, locale)}</div></div>
+      {highlighted && <span className="badge bg-amber-400 px-3 py-1 text-sm text-black">{t('طلب جديد', 'New order')}</span>}
+    </div>
+    <div className="merchant-order-badges">
+      <span className={`badge ${pickup ? 'bg-orange-100 text-orange-900' : 'bg-sky-100 text-sky-900'}`}>{pickup ? t('🏪 استلام من المحل', '🏪 Restaurant pickup') : t('🛵 توصيل', '🛵 Delivery')}{o.channel === 'COUNTER' ? t(' · كاشير', ' · Counter') : t(' · أونلاين', ' · Online')}</span>
+      <span className={`badge ${PAYMENT_STATUS_TONE[o.paymentStatus]}`}>{copy.paymentMethod[o.paymentMethod]} · {copy.paymentStatus[o.paymentStatus]}</span>
+      {pending > 0 && <span className="badge bg-blue-100 text-blue-800">{t('محفوظ على الجهاز · ينتظر المزامنة', 'Saved on device · awaiting sync')}</span>}
+    </div>
+    <div className="merchant-order-customer"><small className="text-xs text-gray-500">{t('العميل', 'Customer')}</small><strong>{o.channel === 'COUNTER' && o.customerName === 'عميل المحل' ? t('عميل المحل', 'Walk-in customer') : o.customerName}</strong>
+      {o.customerPhone && <a href={`tel:${o.customerPhone}`} className="merchant-order-phone" onClick={(event) => event.stopPropagation()} aria-label={t('اتصل بالعميل ', 'Call customer ') + o.customerPhone}><span dir="ltr">{o.customerPhone}</span><small><Phone size={17} />{t('اتصال', 'Call')}</small></a>}
+    </div>
+    <ul className="merchant-order-items" aria-label={t('الأصناف والكميات', 'Items and quantities')}>{o.items.map((item) => <li key={item.id}><span className="merchant-item-quantity" aria-label={t('الكمية ', 'Quantity ') + item.quantity}>{item.quantity}</span><div><strong className="merchant-item-name">{localizedName(locale, item.nameAr, item.nameEn)}</strong>{item.variantNameAr && <span className="merchant-item-options">{localizedName(locale, item.variantNameAr, item.variantNameEn)}</span>}{item.addons.length > 0 && <span className="merchant-item-options">+ {item.addons.map((a) => localizedName(locale, a.nameAr, a.nameEn)).join(locale === 'ar' ? '، ' : ', ')}</span>}{item.note && <p className="merchant-item-note">{item.note}</p>}</div></li>)}</ul>
+    {o.customerNote && <p className="merchant-item-note mt-3">📝 {o.customerNote}</p>}
+    <div className="merchant-order-destination"><small>{pickup ? t('الاستلام من المحل', 'Collect at the restaurant') : t('نقطة التسليم', 'Delivery destination')}</small><strong>{localizedName(locale, o.deliveryPointName, o.deliveryPointNameEn)}</strong>{o.assignedToName && <p className="merchant-assigned-courier mt-2 text-sm text-purple-800">{t('مسؤول التوصيل', 'Courier')}: {o.assignedToName}</p>}</div>
+    <div className="merchant-order-total"><span>{t('الإجمالي', 'Total')}</span><strong>{formatMoney(o.total, locale)}</strong></div>
+    {o.paymentReference && <p className="mt-2 break-all text-sm text-gray-600">{t('رقم التحويل', 'Transfer reference')}: <b dir="ltr">{o.paymentReference}</b></p>}
+    {(o.status === 'READY' || o.status === 'OUT_FOR_DELIVERY' || o.status === 'ARRIVED_AT_GATE') && (o.paymentMethod === 'CASH' && o.paymentStatus !== 'PAYMENT_VERIFIED' ? <div className="merchant-order-collection mt-3 rounded-xl bg-amber-100 px-3 py-3 text-center text-xl font-black text-amber-900">{t('حصّل ', 'Collect ')}{formatMoney(o.total, locale)} {t('كاش', 'cash')}</div> : <div className="merchant-order-collection mt-3 rounded-xl bg-green-50 px-3 py-2 text-center text-base font-bold text-green-800">{t('مدفوع ✓ · متحصّلش فلوس', 'Paid ✓ · no cash to collect')}</div>)}
+    {o.hasPaymentAttachment && perms.has('payments.verify') && <a href={`/api/merchant/orders/${o.id}/attachment`} target="_blank" rel="noreferrer" className="btn btn-secondary mt-3 min-h-12 w-full" onClick={(event) => event.stopPropagation()}>📎 {t('عرض صورة التحويل', 'View payment proof')}</a>}
+    {o.status === 'AWAITING_PAYMENT' && <p className="mt-3 text-sm leading-relaxed text-gray-600">{t('مستنيين تحويل العميل. أكّد الدفع فقط بعد التأكد إن التحويل وصلك.', 'Waiting for the customer’s transfer. Verify only after confirming that the money arrived.')}</p>}
+    {kitchenPhase && readyIn !== null && <div className={`merchant-order-timing mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-3 ${readyIn >= 0 ? 'bg-orange-50 text-orange-800' : 'bg-red-100 text-red-700'}`}><span className="text-sm font-bold">{readyIn >= 0 ? t('التجهيز خلال', 'Preparation in') : t('متأخر عن المتوقع', 'Past estimate')}</span><b className="font-mono text-2xl font-black" dir="ltr">{mmss(readyIn)}</b></div>}
+    {o.status === 'CONFIRMED' && !o.estimatedReadyAt && <p className="mt-3 text-center text-sm text-gray-500">{t('الوقت المتوقع هيظهر بعد المزامنة', 'Estimated timing will appear after syncing')}</p>}
+    {!pickup && (o.status === 'READY' || o.status === 'OUT_FOR_DELIVERY') && arriveIn !== null && <p className="merchant-delivery-estimate mt-3 text-center text-sm text-gray-600">{t('وصول متوقع خلال', 'Estimated arrival in')}: <b dir="ltr">{arriveIn >= 0 ? mmss(arriveIn) : '+' + mmss(arriveIn)}</b></p>}
+    {canPrimary && primary && <button className={`btn merchant-order-primary mt-4 w-full ${primaryTone}`} disabled={saving} onClick={async (event) => { event.stopPropagation(); setSaving(true); try { await onAction(o, primary); } finally { setSaving(false); } }}>{saving ? t('بنحفظ الخطوة…', 'Saving action…') : primaryLabel}{primary === 'VERIFY_PAYMENT' ? ` (${formatMoney(o.total, locale)})` : ''}</button>}
+    <details className="mt-2" onClick={(event) => event.stopPropagation()}><summary className="cursor-pointer rounded-lg px-2 py-3 text-sm font-semibold text-gray-600">{t('طباعة وخيارات أخرى', 'Print & more options')}</summary><div className="mt-2 grid gap-2">
+      {o.status === 'PAYMENT_REVIEW' && perms.has('payments.verify') && <button className="btn btn-secondary min-h-12" disabled={saving} onClick={() => onReason('REJECT_PAYMENT')}>{t('رفض التحويل', 'Reject payment')}</button>}
+      {o.status === 'OUT_FOR_DELIVERY' && perms.has('orders.delivery') && <button className="btn btn-secondary min-h-12" disabled={saving} onClick={() => onAction(o, 'COMPLETE')}>{t('تم التسليم مباشرة', 'Delivered directly')}</button>}
+      {perms.has('receipts.print') && <button className="btn btn-secondary min-h-12" onClick={onPrint}>🖨️ {t('طباعة', 'Print')}</button>}
+      {perms.has('orders.cancel') && <button className="btn btn-ghost min-h-12 text-red-600" disabled={saving} onClick={() => onReason('CANCEL')}>{t('إلغاء الطلب', 'Cancel order')}</button>}
+    </div></details>
+  </article>;
 }
 
 function ReasonDialog({

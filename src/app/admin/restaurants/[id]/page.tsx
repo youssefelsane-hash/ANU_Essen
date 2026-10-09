@@ -11,6 +11,7 @@ import { getRestaurant } from '@/server/services/store';
 import { resumeRestaurantAction, saveDeliveryPointAction, suspendRestaurantAction, updatePaymentMethodAction, updateRestaurantAction } from '@/server/actions/admin-restaurants';
 import { ActionForm, SubmitButton } from '@/components/forms';
 import { HoursEditor } from '@/components/admin/editors';
+import { PlatformRateField } from '@/components/admin/platform-rate-field';
 import { RestaurantBrandEditor } from '@/components/admin/restaurant-brand-editor';
 import { Forbidden, PageTitle, RestaurantTabs } from '@/components/admin/ui';
 
@@ -63,15 +64,14 @@ export default async function RestaurantSettingsPage({ params }: { params: Promi
               <HoursEditor name="openingHours" initial={r.openingHours ?? null} />
             </div>
 </div></details>
-            <details className="admin-details admin-form-section sm:col-span-2"><summary>{t('العمولة وإعدادات إضافية', 'Commission & other settings')}</summary><div className="grid gap-3 pt-3 sm:grid-cols-2">            <Field label={t("اسم رابط المنيو", "URL slug (/s/…)")}><input aria-label={t("اسم رابط المنيو", "Menu link name")} name="slug" dir="ltr" defaultValue={r.slug} maxLength={48} className="input" required /><p className="mt-1 text-[11px] text-gray-500">{t("تغيير الاسم هنا يغيّر الرابط المباشر؛ رمز الطلب المطبوع يظل يعمل.", "Changing this updates direct menu links. Permanent QR links keep working.")}</p></Field>
+            <PlatformRateField basisPoints={r.commissionBps} />
+            <details className="admin-details admin-form-section sm:col-span-2"><summary>{t('إعدادات إضافية', 'Other settings')}</summary><div className="grid gap-3 pt-3 sm:grid-cols-2">            <Field label={t("اسم رابط المنيو", "URL slug (/s/…)")}><input aria-label={t("اسم رابط المنيو", "Menu link name")} name="slug" dir="ltr" defaultValue={r.slug} maxLength={48} className="input" required /><p className="mt-1 text-[11px] text-gray-500">{t("تغيير الاسم هنا يغيّر الرابط المباشر؛ رمز الطلب المطبوع يظل يعمل.", "Changing this updates direct menu links. Permanent QR links keep working.")}</p></Field>
 
             <Field label={t("المنطقة الزمنية", "Timezone")}><input aria-label={t("المنطقة الزمنية", "Timezone")} name="timezone" dir="ltr" defaultValue={r.timezone} className="input" /></Field>
 
 
-            <Field label={t("عمولة المنصة (%)", "Platform commission (%)")}><input name="commissionPercent" defaultValue={r.commissionBps / 100} className="input" inputMode="decimal" /></Field>
             <Field label={t("إلغاء الطلب غير المدفوع بعد — بالدقائق، صفر للإيقاف", "Cancel unpaid InstaPay orders after (min, 0 = never)")}><input name="unpaidTimeoutMinutes" defaultValue={r.unpaidTimeoutMinutes} className="input" inputMode="numeric" /></Field>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="requirePhone" defaultChecked={r.requirePhone} /> {t("رقم الهاتف مطلوب للطلب", "Phone number required at checkout")}</label>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="counterCommissionEnabled" defaultChecked={r.counterCommissionEnabled} /> {t("احسب عمولة المنصة على طلبات الكاشير كمان", "Charge platform commission on counter orders too")}</label>
 </div></details>
             <div className="sm:col-span-2"><SubmitButton>{t("حفظ بيانات المطعم", "Save settings")}</SubmitButton></div>
           </ActionForm>

@@ -41,7 +41,6 @@ describe('restaurant suspension', () => {
     const cashier = await authFor(d, 'cashier@alrayez.test');
     const staff: ActionActor = { type: 'USER', userId: cashier.user.id, label: 'cashier', auth: cashier };
     const inProgress = await createOrder('alrayez', input(), key());
-    await applyOrderAction({ orderId: inProgress.orderId, action: 'ACCEPT', actor: staff });
 
     await d.update(s.restaurants).set({ isActive: false, suspendedReason: 'commission overdue' }).where(eq(s.restaurants.id, demo.restaurantId));
 
@@ -55,7 +54,7 @@ describe('restaurant suspension', () => {
     await applyOrderAction({ orderId: inProgress.orderId, action: 'MARK_READY', actor: { type: 'USER', userId: kitchen.user.id, label: 'k', auth: kitchen } });
 
     await d.update(s.restaurants).set({ isActive: true, suspendedReason: null }).where(eq(s.restaurants.id, demo.restaurantId));
-    expect((await createOrder('alrayez', input(), key())).status).toBe('CREATED');
+    expect((await createOrder('alrayez', input(), key())).status).toBe('CONFIRMED');
   });
 });
 
@@ -71,7 +70,6 @@ describe('delivery hand-over', () => {
     const cash = await createOrder('alrayez', input(), key());
     const cash2 = await createOrder('alrayez', input({ customerPhone: '01098765432' }), key());
     for (const o of [cash, cash2]) {
-      await applyOrderAction({ orderId: o.orderId, action: 'ACCEPT', actor: asCashier });
       await applyOrderAction({ orderId: o.orderId, action: 'MARK_READY', actor: asKitchen });
       await applyOrderAction({ orderId: o.orderId, action: 'OUT_FOR_DELIVERY', actor: asCourier });
     }

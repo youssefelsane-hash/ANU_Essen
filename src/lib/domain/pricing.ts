@@ -6,6 +6,10 @@
 export const PROMOTION_TYPES = ['PERCENT', 'FIXED', 'PRODUCT_PERCENT', 'PRODUCT_FIXED', 'BANNER_ONLY'] as const;
 export type PromotionType = (typeof PROMOTION_TYPES)[number];
 
+/** Historical orders keep their merchant-funded commission; all new prices declare their mode. */
+export const PRICING_MODES = ['LEGACY_COMMISSION', 'ONLINE_PLATFORM_FEE', 'COUNTER_NO_FEE'] as const;
+export type PricingMode = (typeof PRICING_MODES)[number];
+
 export interface MenuVariant {
   id: string;
   nameAr: string;
@@ -93,6 +97,9 @@ export interface PricedLine {
 export type PromoErrorCode = 'INVALID_CODE' | 'NOT_STARTED' | 'EXPIRED' | 'MIN_SUBTOTAL' | 'USAGE_LIMIT' | 'NOT_APPLICABLE';
 
 export interface PricedCart {
+  pricingMode: PricingMode;
+  platformFeeAmount: number;
+  platformFeeBps: number;
   lines: PricedLine[];
   subtotal: number;
   discount: number;
@@ -133,6 +140,8 @@ export class PricingError extends Error {
 }
 
 export interface PricingContext {
+  /** Explicit for new orders. Omission preserves the legacy pure-pricing contract. */
+  pricingMode?: PricingMode;
   products: ReadonlyMap<string, MenuProduct>;
   addonGroups: ReadonlyMap<string, MenuAddonGroup>;
   promotions: readonly PromotionRule[];
@@ -312,10 +321,17 @@ export function priceCart(input: readonly CartLineInput[], ctx: PricingContext):
 
   const best = candidates.sort((a, b) => b.discount - a.discount)[0] ?? null;
   const discount = best?.discount ?? 0;
-  const total = subtotal - discount + ctx.deliveryFee;
-  const commissionAmount = commissionFor(subtotal, discount, ctx.commissionBps);
+  const pricingMode = ctx.pricingMode ?? 'LEGACY_COMMISSION';
+  const commissionBps = pricingMode === 'COUNTER_NO_FEE' ? 0 : ctx.commissionBps;
+  const commissionAmount = commissionFor(subtotal, discount, commissionBps);
+  // The online fee is calculated once on discounted food + extras, never on delivery.
+  const platformFeeAmount = pricingMode === 'ONLINE_PLATFORM_FEE' ? commissionAmount : 0;
+  const total = subtotal - discount + ctx.deliveryFee + platformFeeAmount;
 
   return {
+    pricingMode,
+    platformFeeAmount,
+    platformFeeBps: pricingMode === 'ONLINE_PLATFORM_FEE' ? commissionBps : 0,
     lines,
     subtotal,
     discount,
@@ -326,7 +342,7 @@ export function priceCart(input: readonly CartLineInput[], ctx: PricingContext):
     loadUnits,
     minOrderAmount: ctx.minOrderAmount,
     minOrderShortfall: Math.max(0, ctx.minOrderAmount - subtotal),
-    commissionBps: ctx.commissionBps,
+    commissionBps,
     commissionAmount,
     merchantNet: total - commissionAmount,
   };
