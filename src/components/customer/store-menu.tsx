@@ -11,7 +11,7 @@ import { estimateLine, useCart } from '@/client/cart';
 import { lastOrderFor, MY_ORDERS_KEY, readJson, writeJson, type SavedOrder } from '@/client/storage';
 import { formatMoney } from '@/lib/domain/misc';
 import { brandTextColor } from '@/lib/domain/restaurant-brand';
-import type { PublicMenu, PublicMenuProduct } from '@/lib/types';
+import type { CustomerQuoteResponse, PublicMenu, PublicMenuProduct } from '@/lib/types';
 import './customer.css';
 
 const searchable = (value: string) => value.toLowerCase().normalize('NFKD').replace(/[\u064B-\u065F]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي');
@@ -34,6 +34,18 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
   /** Suspended by the platform: browsing only, no cart. */
   const suspended = menu.store.reason === 'INACTIVE';
   const defaultPoint = menu.deliveryPoints.find((p) => p.isDefault) ?? menu.deliveryPoints[0];
+  const cartItems = useMemo(() => lines.map((line) => ({
+    productId: line.productId,
+    variantId: line.variantId,
+    addonIds: line.addonIds,
+    quantity: line.quantity,
+  })), [lines]);
+  // Menu prices are published per component, while the server rounds a whole
+  // cart once. Use the public quote for basket figures so unusual piaster
+  // prices and quantities never move by a piaster on the checkout screen.
+  const basketQuoteKey = JSON.stringify({ items: cartItems, deliveryPointId: defaultPoint?.id ?? null });
+  const [basketQuoteState, setBasketQuoteState] = useState<{ key: string; data?: CustomerQuoteResponse } | null>(null);
+  const basketQuote = basketQuoteState?.key === basketQuoteKey ? basketQuoteState.data ?? null : null;
 
   useEffect(() => {
     const utm = new URLSearchParams(window.location.search).get('utm_source');
@@ -66,10 +78,51 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
     return () => clearTimeout(timer);
   }, [noticeProduct]);
 
-  const totals = useMemo(() => lines.reduce((sum, line) => ({
-    count: sum.count + line.quantity,
-    total: sum.total + estimateLine(menu, line, locale).total,
-  }), { count: 0, total: 0 }), [lines, menu, locale]);
+  useEffect(() => {
+    if (!cartItems.length) {
+      setBasketQuoteState(null);
+      return;
+    }
+    const ctrl = new AbortController();
+    let disposed = false;
+    const refreshQuote = async () => {
+      if (document.hidden || !navigator.onLine) return;
+      try {
+        const res = await fetch('/api/public/stores/' + slug + '/quote', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ items: cartItems, deliveryPointId: defaultPoint?.id ?? null }),
+          signal: ctrl.signal,
+        });
+        if (!res.ok || disposed) return;
+        const data = await res.json() as CustomerQuoteResponse;
+        if (!disposed) setBasketQuoteState({ key: basketQuoteKey, data });
+      } catch {
+        // Checkout retries the authoritative quote and explains any error.
+      }
+    };
+    const timer = setTimeout(refreshQuote, 150);
+    const retryTimer = setInterval(refreshQuote, 30_000);
+    window.addEventListener('online', refreshQuote);
+    document.addEventListener('visibilitychange', refreshQuote);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      clearInterval(retryTimer);
+      ctrl.abort();
+      window.removeEventListener('online', refreshQuote);
+      document.removeEventListener('visibilitychange', refreshQuote);
+    };
+  }, [cartItems, defaultPoint?.id, slug, basketQuoteKey, menu]);
+
+  const totals = useMemo(() => ({ count: lines.reduce((sum, line) => sum + line.quantity, 0) }), [lines]);
+  const basketAmount = !totals.count ? formatMoney(0, locale) : basketQuote ? formatMoney(basketQuote.subtotal, locale) : '…';
+  const quotedLineTotal = (line: typeof lines[number], index: number) => {
+    const quoted = basketQuote?.lines[index];
+    return quoted && quoted.productId === line.productId && quoted.variantId === line.variantId && quoted.quantity === line.quantity
+      ? quoted.lineTotal
+      : null;
+  };
 
   const byCategory = useMemo(() => menu.categories
     .filter((c) => category === 'all' || c.id === category)
@@ -77,8 +130,6 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
       ...c,
       products: menu.products.filter((p) => p.categoryId === c.id && searchable(p.nameAr + ' ' + p.nameEn + ' ' + (p.descriptionAr ?? '') + ' ' + (p.descriptionEn ?? '')).includes(searchable(query.trim()))),
     })).filter((c) => c.products.length > 0), [menu, category, query]);
-  const platformFeeBps = menu.restaurant.platformFeeBps ?? 0;
-  const estimatedFee = Math.round(totals.total * platformFeeBps / 10_000);
   const totalProducts = byCategory.reduce((sum, c) => sum + c.products.length, 0);
   const categories = menu.categories.filter((c) => menu.products.some((p) => p.categoryId === c.id));
   const heroImage = menu.restaurant.coverImageUrl || menu.banners.find((b) => b.imageUrl)?.imageUrl;
@@ -190,7 +241,6 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
 
           <section id="menu" className="menu-section">
             <div className="section-heading"><div><span className="section-eyebrow">{t("اختار وجبتك", "Choose your meal")}</span><h2>{t("المنيو", "Menu")}</h2></div><span>{menu.products.length}{t(menu.products.length === 1 ? " صنف" : " أصناف", menu.products.length === 1 ? " item" : " items")}</span></div>
-            {platformFeeBps > 0 && <p className="platform-fee-notice">{t("الأسعار الظاهرة هي أسعار المطعم. تُضاف رسوم منصة ", "Prices shown are restaurant prices. A ")}{platformFeeBps / 100}%{t(" على قيمة الأكل بعد الخصم في طلبات الأونلاين. الإجمالي واضح قبل التأكيد.", " platform fee applies to food after discounts on online orders. You see the total before confirming.")}</p>}
             <label className="menu-search">
               <Search size={19} /><input aria-label={t("ابحث في المنيو", "Search the menu")} placeholder={t("نفسك في إيه؟ ابحث عن وجبتك…", "What are you craving? Search for your meal…")} value={query} onChange={(e) => setQuery(e.target.value)} />
               {query && <button type="button" onClick={() => setQuery('')} aria-label={t("مسح البحث", "Clear search")}><X size={17} /></button>}
@@ -243,10 +293,9 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
         <aside className="store-sidebar">
           <div className="desktop-basket">
             <div className="basket-heading"><ShoppingBag size={21} /><h2>{t("طلبك، على ذوقك", "Your basket")}</h2><span>{totals.count}</span></div>
-            {lines.length ? <div className="basket-preview-lines">{lines.map((line) => { const item = estimateLine(menu, line, locale); return <div key={line.key}><span><b>{line.quantity} × </b>{item.name}</span><strong>{formatMoney(item.total, locale)}</strong></div>; })}</div> : <div className="basket-empty"><ShoppingBag size={37} strokeWidth={1.2} /><p>{t("كل الحلو بيبدأ باختيار.", "Good food starts with a choice.")}</p><span>{t("ضيف وجبتك المفضلة، والباقي علينا.", "Add your favourite meal. We'll take care of the rest.")}</span></div>}
-            <div className="basket-total"><span>{t("قيمة الأصناف", "Items subtotal")}</span><strong>{formatMoney(totals.total, locale)}</strong></div>
-            {estimatedFee > 0 && <div className="basket-total"><span>{t("رسوم المنصة المبدئية", "Estimated platform fee")}</span><strong>{formatMoney(estimatedFee, locale)}</strong></div>}
-            <div className="basket-total"><span>{t("قبل التوصيل والخصم", "Before delivery & discounts")}</span><strong>{formatMoney(totals.total + estimatedFee, locale)}</strong></div>
+            {lines.length ? <div className="basket-preview-lines">{lines.map((line, index) => { const item = estimateLine(menu, line, locale); const total = quotedLineTotal(line, index); return <div key={line.key}><span><b>{line.quantity} × </b>{item.name}</span><strong>{total === null ? '…' : formatMoney(total, locale)}</strong></div>; })}</div> : <div className="basket-empty"><ShoppingBag size={37} strokeWidth={1.2} /><p>{t("كل الحلو بيبدأ باختيار.", "Good food starts with a choice.")}</p><span>{t("ضيف وجبتك المفضلة، والباقي علينا.", "Add your favourite meal. We'll take care of the rest.")}</span></div>}
+            <div className="basket-total"><span>{t("قيمة الأصناف", "Items subtotal")}</span><strong>{basketAmount}</strong></div>
+            <div className="basket-total"><span>{t("قبل التوصيل والخصم", "Before delivery & discounts")}</span><strong>{basketAmount}</strong></div>
             <Link href={'/s/' + slug + '/checkout'} className={'customer-primary-button ' + (!lines.length ? 'is-disabled' : '')} aria-disabled={!lines.length} tabIndex={lines.length ? 0 : -1}>{t("مراجعة الطلب ", "Review order ")}<ArrowLeft className="directional-arrow" size={17} /></Link>
             <p className="basket-footnote">{t("التوصيل والخصم بيتحسبوا في الخطوة الجاية.", "Delivery and discounts are calculated at checkout.")}</p>
           </div>
@@ -255,7 +304,7 @@ export function StoreMenu({ menu: initialMenu, orderAhead }: { menu: PublicMenu;
       </div>
 
       <div className={'cart-toast ' + (notice ? 'is-visible' : '')} role="status" aria-live="polite"><Check size={17} />{notice}</div>
-      {totals.count > 0 && !suspended && <div className="mobile-cart-bar"><Link href={'/s/' + slug + '/checkout'} className="customer-primary-button"><span className="cart-count">{totals.count}</span><span>{t("مراجعة الطلب", "Review order")}</span><strong>{formatMoney(totals.total + estimatedFee, locale)}</strong><ArrowLeft className="directional-arrow" size={18} /></Link></div>}
+      {totals.count > 0 && !suspended && <div className="mobile-cart-bar"><Link href={'/s/' + slug + '/checkout'} className="customer-primary-button"><span className="cart-count">{totals.count}</span><span>{t("مراجعة الطلب", "Review order")}</span><strong>{basketAmount}</strong><ArrowLeft className="directional-arrow" size={18} /></Link></div>}
       {selected && !suspended && <ProductSheet key={selected.id} menu={menu} product={menu.products.find((p) => p.id === selected.id) ?? selected} onClose={closeSheet} onAdd={(v, a, q) => { addProduct(selected, v, a, q); setSelected(null); }} />}
     </main>
   );

@@ -15,7 +15,9 @@ export default async function NewCounterOrderPage() {
   if (!permissions.has('orders.create')) {
     return <p className="p-6 text-center">{text(locale, 'مش مسموح لك تسجّل طلبات من الكاشير.', 'You are not allowed to record counter orders.')}</p>;
   }
-  const menu = await loadPublicMenu(db(), restaurant.slug);
+  // Walk-in orders never carry the online all-in price, so this cashier view
+  // intentionally receives the restaurant's counter prices.
+  const menu = await loadPublicMenu(db(), restaurant.slug, { customerPrices: false });
   if (!menu) notFound();
   return (
     <CounterOrder

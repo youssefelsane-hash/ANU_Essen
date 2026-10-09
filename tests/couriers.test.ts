@@ -135,11 +135,21 @@ describe('per-restaurant physical cash accounting', () => {
     const a = (await merchantCourierOverview(d, owner, demo.restaurantId)).balances.find((b) => b.userId === delivery.user.id)!;
     const b = (await merchantCourierOverview(d, owner2, second.id)).balances.find((x) => x.userId === delivery.user.id)!;
     expect(a).toMatchObject({ cashCollected: first.total, cashPending: pending.total, outstanding: first.total, delivered: 2, onTheWay: 1 });
-    expect(a.merchantShare + a.platformShare).toBe(first.total);
-    expect(a.platformShare).toBe(300);
-    expect(b).toMatchObject({ cashCollected: other.total, outstanding: other.total, merchantShare: 10000, platformShare: 1000, delivered: 1 });
+    expect(a).not.toHaveProperty('platformShare');
+    expect(a).not.toHaveProperty('merchantShare');
+    expect(b).toMatchObject({ cashCollected: other.total, outstanding: other.total, delivered: 1 });
+    expect(b).not.toHaveProperty('platformShare');
+    expect(b).not.toHaveProperty('merchantShare');
+    const platformBalances = (await platformCourierOverview(d, admin)).balances;
+    const platformA = platformBalances.find((row) => row.restaurantId === demo.restaurantId && row.userId === delivery.user.id)!;
+    const platformB = platformBalances.find((row) => row.restaurantId === second.id && row.userId === delivery.user.id)!;
+    expect(platformA.merchantShare + platformA.platformShare).toBe(first.total);
+    expect(platformA.platformShare).toBe(300);
+    expect(platformB).toMatchObject({ merchantShare: 10000, platformShare: 1000 });
     const personal = await courierCashReport(d, delivery, demo.restaurantId);
     expect(personal).toMatchObject({ restaurantId: demo.restaurantId, cashCollected: first.total, cashOutstanding: first.total, ordersCompleted: 2 });
+    expect(personal).not.toHaveProperty('platformShare');
+    expect(personal).not.toHaveProperty('merchantShare');
   });
 
   it('records hand-ins exactly once, rejects overpayments and blocks cross-store/cross-actor key reuse', async () => {
@@ -202,6 +212,8 @@ describe('per-restaurant physical cash accounting', () => {
     expect(report).toMatchObject({ cashCollected: delivered.total, cashOutstanding: delivered.total, cashPending: pending.total, ordersCompleted: 1 });
     const daily = (await courierSummary(d, demo.restaurantId, dayStart, new Date(Date.now() + 60_000))).find((r) => r.userId === delivery.user.id)!;
     expect(daily).toMatchObject({ cashCollected: delivered.total, cashPending: pending.total, delivered: 1 });
+    expect(daily).not.toHaveProperty('platformShare');
+    expect(daily).not.toHaveProperty('merchantShare');
     await d.update(s.orders).set({ completedAt: oldCreated }).where(eq(s.orders.id, delivered.orderId));
     const next = await courierCashReport(d, delivery, demo.restaurantId);
     expect(next).toMatchObject({ cashCollected: 0, cashOutstanding: delivered.total, cashPending: pending.total, ordersCompleted: 0 });

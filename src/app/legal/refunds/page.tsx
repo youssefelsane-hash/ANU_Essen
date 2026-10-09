@@ -28,9 +28,6 @@ export default function RefundPolicyPage() {
           ['المطعم بيراجع الطلب ويقرر استرجاع كامل أو جزئي، أو يرد عليك بالسبب لو رفض. القرار بيظهرلك في نفس الصفحة.', 'The restaurant reviews it and refunds all or part of the amount, or replies with a reason if it declines. You see the decision on the same page.'],
           ['استرجاع إنستاباي بيتحوّل على العنوان أو الرقم اللي بتكتبه في الطلب؛ واسترجاع الكاش بيكون من المطعم.', 'InstaPay refunds go to the address or number you enter in the request; cash refunds are given by the restaurant.'],
         ] },
-        { title: ['عمولة المنصة', 'Platform commission'], body: [
-          ['العميل ما بيدفعش أي رسوم للمنصة. ولو المطعم رجّع مبلغ، عمولة المنصة على الجزء ده بتتلغي تلقائيًا.', 'Customers pay no platform fee. When a restaurant refunds an amount, the platform commission on that amount is cancelled automatically.'],
-        ] },
       ]}
     />
   );

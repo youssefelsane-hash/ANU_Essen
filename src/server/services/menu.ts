@@ -14,6 +14,7 @@ import {
 } from '../db/schema';
 import type { MenuAddonGroup, MenuProduct, PromotionRule } from '../../lib/domain/pricing';
 import type { PublicMenu } from '../../lib/types';
+import { publishedFoodPrice } from '../../lib/domain/customer-pricing';
 import { getRestaurantBySlug, getStoreLive } from './store';
 
 export interface MenuCatalog {
@@ -108,7 +109,9 @@ export async function loadPromotionRules(d: Db, restaurantId: string): Promise<P
   }));
 }
 
-export async function loadPublicMenu(d: Db, slug: string, now = new Date()): Promise<PublicMenu | null> {
+export async function loadPublicMenu(d: Db, slug: string, options: { customerPrices?: boolean; now?: Date } = {}): Promise<PublicMenu | null> {
+  const now = options.now ?? new Date();
+  const customerPrices = options.customerPrices !== false;
   const r = await getRestaurantBySlug(d, slug);
   // A suspended restaurant still resolves (QR codes keep working) and shows a clear message instead of a 404.
   if (!r) return null;
@@ -157,9 +160,8 @@ export async function loadPublicMenu(d: Db, slug: string, now = new Date()): Pro
       taglineEn: r.taglineEn,
       brandColor: r.brandColor,
       phone: r.phone,
-      minOrderAmount: r.minOrderAmount,
+      minOrderAmount: customerPrices ? publishedFoodPrice(r.minOrderAmount, r.commissionBps) : r.minOrderAmount,
       requirePhone: r.requirePhone,
-      platformFeeBps: r.commissionBps,
     },
     store: { status: live.status, reason: live.reason, etaMinutes: live.etaMinutes },
     categories: categoryRows.map((c) => ({ id: c.id, nameAr: c.nameAr, nameEn: c.nameEn })),
@@ -171,9 +173,9 @@ export async function loadPublicMenu(d: Db, slug: string, now = new Date()): Pro
       descriptionAr: p.descriptionAr,
       descriptionEn: p.descriptionEn,
       imageUrl: p.imageUrl,
-      basePrice: p.basePrice,
+      basePrice: customerPrices ? publishedFoodPrice(p.basePrice, r.commissionBps) : p.basePrice,
       isAvailable: p.isAvailable,
-      variants: p.variants.map((v, i) => ({ id: v.id, nameAr: v.nameAr, nameEn: v.nameEn, price: v.price, isAvailable: v.isAvailable, isDefault: i === 0 })),
+      variants: p.variants.map((v, i) => ({ id: v.id, nameAr: v.nameAr, nameEn: v.nameEn, price: customerPrices ? publishedFoodPrice(v.price, r.commissionBps) : v.price, isAvailable: v.isAvailable, isDefault: i === 0 })),
       addonGroupIds: p.addonGroupIds,
     })),
     addonGroups: [...catalog.addonGroups.values()].map((g) => ({
@@ -182,7 +184,7 @@ export async function loadPublicMenu(d: Db, slug: string, now = new Date()): Pro
       nameEn: g.nameEn,
       minSelect: g.minSelect,
       maxSelect: g.maxSelect,
-      addons: g.addons.map((a) => ({ id: a.id, nameAr: a.nameAr, nameEn: a.nameEn, price: a.price, isAvailable: a.isAvailable })),
+      addons: g.addons.map((a) => ({ id: a.id, nameAr: a.nameAr, nameEn: a.nameEn, price: customerPrices ? publishedFoodPrice(a.price, r.commissionBps) : a.price, isAvailable: a.isAvailable })),
     })),
     banners: bannerRows.map((b) => ({ id: b.id, titleAr: b.titleAr, titleEn: b.titleEn, subtitleAr: b.subtitleAr, subtitleEn: b.subtitleEn, imageUrl: b.imageUrl, bgColor: b.bgColor, textColor: b.textColor })),
     paymentMethods: methodRows.map((m) => ({ method: m.method })),

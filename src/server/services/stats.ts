@@ -88,6 +88,12 @@ export async function periodStats(d: Db, from: Date, to: Date, restaurantId?: st
   };
 }
 
+/** Restaurant dashboards receive operational sales figures only. */
+export async function merchantPeriodStats(d: Db, from: Date, to: Date, restaurantId: string): Promise<Omit<PeriodStats, 'commission' | 'merchantNet'>> {
+  const { commission: _commission, merchantNet: _merchantNet, ...stats } = await periodStats(d, from, to, restaurantId);
+  return stats;
+}
+
 /** Live counts of in-progress orders by status. */
 export async function activeCounts(d: Db, restaurantId?: string): Promise<Partial<Record<OrderStatus, number>>> {
   const rows = await d
@@ -263,5 +269,8 @@ export async function courierAccounting(d: Db, restaurantId?: string, courierUse
 
 /** Collections belong to the day completed, not the day the order was created. */
 export async function courierSummary(d: Db, restaurantId: string, from: Date, to: Date) {
-  return courierAccounting(d, restaurantId, undefined, { from, to });
+  const balances = await courierAccounting(d, restaurantId, undefined, { from, to });
+  // This report powers the restaurant dashboard; the platform share is kept
+  // exclusively in platform-finance reports.
+  return balances.map(({ platformShare: _platformShare, merchantShare: _merchantShare, ...balance }) => balance);
 }

@@ -147,9 +147,6 @@ export interface TrackingView {
     deliveryPointNameEn?: string | null;
     fulfillment: Fulfillment;
     items: SnapshotItem[];
-    pricingMode?: PricingMode;
-    platformFeeAmount?: number;
-    platformFeeBps?: number;
     subtotal: number;
     discountTotal: number;
     deliveryFee: number;
@@ -205,8 +202,6 @@ export interface PublicMenu {
     phone: string | null;
     minOrderAmount: number;
     requirePhone: boolean;
-    /** Menu item prices are merchant base prices. Fee is added once in the order quote. */
-    platformFeeBps?: number;
   };
   store: { status: EffectiveStatus; reason: StatusReason; etaMinutes: number };
   categories: { id: string; nameAr: string; nameEn: string }[];
@@ -244,3 +239,6 @@ export interface QuoteResponse {
   minOrderShortfall: number;
   etaMinutes: number;
 }
+
+/** Quote payload returned to a customer. Platform accounting fields stay server-side. */
+export type CustomerQuoteResponse = Omit<QuoteResponse, 'pricingMode' | 'platformFeeAmount' | 'platformFeeBps'>;

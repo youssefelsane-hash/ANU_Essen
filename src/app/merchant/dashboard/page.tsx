@@ -3,7 +3,7 @@ import { and, desc, eq, gte, lt } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { orders } from '@/server/db/schema';
 import { merchantContext } from '@/server/merchant-context';
-import { activeCounts, courierSummary, periodStats, salesBySource } from '@/server/services/stats';
+import { activeCounts, courierSummary, merchantPeriodStats, salesBySource } from '@/server/services/stats';
 import { localDateString, localDateToUtc, startOfLocalDay } from '@/lib/domain/hours';
 import { formatMoney, formatTime } from '@/lib/domain/misc';
 import { STATUS_TONE } from '@/lib/labels';
@@ -36,7 +36,7 @@ export default async function MerchantDashboard({ searchParams }: { searchParams
   const to = localDateToUtc(nextDay.toISOString().slice(0, 10), tz);
 
   const [stats, active, list, sources, couriers] = await Promise.all([
-    periodStats(db(), from, to, restaurant.id),
+    merchantPeriodStats(db(), from, to, restaurant.id),
     activeCounts(db(), restaurant.id),
     db()
       .select()

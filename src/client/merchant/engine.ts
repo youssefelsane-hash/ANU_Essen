@@ -3,6 +3,7 @@ import { isTerminal, nextStatus, paymentStatusAfter, primaryActionFor, STATUS_TI
 import type { ActionResult, OrderSnapshot, StoreLive, SyncResponse } from '@/lib/types';
 import { errorMessage, text, type Locale } from '@/lib/i18n';
 import { openLocalDb, readMeta, type LocalDb, type OutboxEntry } from './local-db';
+import { redactOrderPricing } from '@/lib/domain/customer-pricing';
 
 export type Connectivity = 'online' | 'offline' | 'syncing' | 'synced';
 
@@ -156,7 +157,9 @@ export class MerchantEngine {
       if (isTerminal(o.status) && finishedAt && now - finishedAt > KEEP_TERMINAL_MS && !outbox.some((x) => x.orderId === o.id)) {
         await this.db.delete('orders', o.id);
       } else {
-        this.server.set(o.id, o);
+        const visible = redactOrderPricing(o);
+        if ('pricingMode' in o || 'platformFeeAmount' in o || 'platformFeeBps' in o) await this.db.put('orders', visible);
+        this.server.set(o.id, visible);
       }
     }
     if (this.stopped) return;

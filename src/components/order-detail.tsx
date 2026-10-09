@@ -60,7 +60,7 @@ export async function OrderDetail({
         <div className="ms-auto max-w-xs space-y-1 text-sm">
           <div className="flex justify-between"><span>{t('المجموع', 'Subtotal')}</span><span>{money(o.subtotal)}</span></div>
           {o.discountTotal > 0 && <div className="flex justify-between text-green-700"><span>{t('الخصم', 'Discount')} {o.promoCode ? `(${o.promoCode})` : ''}</span><span>-{money(o.discountTotal)}</span></div>}
-          {(o.platformFeeAmount ?? 0) > 0 && <div className="flex justify-between"><span>{t('رسوم المنصة', 'Platform fee')}</span><span>{money(o.platformFeeAmount ?? 0)}</span></div>}
+          {commission && (o.platformFeeAmount ?? 0) > 0 && <div className="flex justify-between"><span>{t('رسوم المنصة', 'Platform fee')}</span><span>{money(o.platformFeeAmount ?? 0)}</span></div>}
           {o.deliveryFee > 0 && <div className="flex justify-between"><span>{t('التوصيل', 'Delivery')}</span><span>{money(o.deliveryFee)}</span></div>}
           <div className="flex justify-between text-base font-extrabold"><span>{t('الإجمالي', 'Total')}</span><span>{money(o.total)}</span></div>
           {(o.refundedTotal ?? 0) > 0 && <div className="flex justify-between font-semibold text-amber-800"><span>{t('مسترد للعميل', 'Refunded')}</span><span>-{money(o.refundedTotal ?? 0)}</span></div>}

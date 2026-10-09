@@ -26,6 +26,7 @@ export type LocalDb = IDBPDatabase<MerchantDB>;
 
 /** Isolate cached phones, visible orders and pending actions on shared restaurant terminals. */
 export function merchantCacheKey(restaurantId: string, userId: string, permissions: Iterable<string>): string {
+  // Preserve the durable outbox across releases; cached orders are redacted on read.
   return `merchant:v2:${restaurantId}:${userId}:${[...permissions].sort().join(',')}`;
 }
 

@@ -15,6 +15,9 @@ vi.mock('@/client/merchant/local-db', () => ({
       if (store === 'outbox') {
         if (disk.write) await disk.write(entry);
         disk.outbox.push(entry);
+      } else if (store === 'orders') {
+        disk.orders = disk.orders.filter((row) => (row as { id: string }).id !== (entry as { id: string }).id);
+        disk.orders.push(structuredClone(entry));
       } else disk.meta.set(key!, entry);
     },
     delete: async (_store: string, key: string) => { disk.outbox = disk.outbox.filter((entry) => (entry as { eventId: string }).eventId !== key); },
@@ -59,6 +62,31 @@ async function start(permissions = ['orders.accept', 'orders.kitchen'], getLocal
 }
 
 describe('merchant outbox under real interaction timing', () => {
+  it('prints a consistent customer receipt from a platform-admin pricing snapshot', () => {
+    const adminSnapshot = order({ pricingMode: 'ONLINE_PLATFORM_FEE', platformFeeAmount: 450, platformFeeBps: 500, total: 9450 });
+    const receipt = receiptText(adminSnapshot, 'Test Restaurant', 'Africa/Cairo');
+    expect(receipt).toMatch(/Subtotal\s+94\.50 EGP/);
+    expect(receipt).toMatch(/TOTAL\s+94\.50 EGP/);
+    expect(receipt).not.toContain('Platform fee');
+    expect(receipt).not.toContain('5%');
+  });
+
+  it('redacts old cached financial splits while preserving and applying pending offline actions', async () => {
+    disk.orders = [order({ status: 'CONFIRMED', pricingMode: 'ONLINE_PLATFORM_FEE', platformFeeAmount: 450, platformFeeBps: 500, total: 9450 })];
+    const pending: OutboxEntry = { eventId: 'before-upgrade', orderId: 'order-1', action: 'MARK_READY', occurredAt: 123, createdAt: 123, attempts: 0 };
+    disk.outbox = [pending];
+    const engine = await start(['orders.kitchen']);
+    const visible = engine.getState().orders[0];
+    expect(visible).toMatchObject({ status: 'READY', subtotal: 9450, total: 9450 });
+    for (const snapshot of [visible, disk.orders[0]]) {
+      expect(snapshot).not.toHaveProperty('pricingMode');
+      expect(snapshot).not.toHaveProperty('platformFeeAmount');
+      expect(snapshot).not.toHaveProperty('platformFeeBps');
+    }
+    expect(disk.outbox).toEqual([pending]);
+    expect(engine.getState().outboxCount).toBe(1);
+  });
+
   it('does not attach listeners or fetch after cleanup stops an instance during its initial database read', async () => {
     let finishRead!: () => void;
     disk.readWait = () => new Promise((resolve) => { finishRead = resolve; });

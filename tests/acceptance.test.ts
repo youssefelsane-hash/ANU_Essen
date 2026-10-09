@@ -45,7 +45,7 @@ describe('acceptance scenario (spec §46)', () => {
     // 3–4. Selects 3 sandwiches; the cart total is computed by the server.
     const items = [{ productId: sandwich.id, variantId: regular.id, addonIds: [], quantity: 3 }];
     const q = await quote('alrayez', { items });
-    expect(q.total).toBe(3 * regular.price + 900);
+    expect(q.total).toBe(3 * regular.price);
     expect(q.platformFeeAmount).toBe(900);
 
     // Device bootstraps before the order exists.
@@ -119,6 +119,7 @@ describe('acceptance scenario (spec §46)', () => {
     const text = receiptText(snap, 'الرايظ الدمشقية', 'Africa/Cairo');
     expect(text).toContain(`Order #${a.orderNumber}`);
     expect(text).toContain('PAID');
+    expect(text).not.toContain('Platform fee');
 
     // 24. Sale appears in the merchant dashboard numbers.
     const dayStart = new Date(Date.now() - 3_600_000);

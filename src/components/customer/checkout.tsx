@@ -13,12 +13,12 @@ import { PROFILE_KEY, prefsKey, readJson, rememberOrder, writeJson, type Checkou
 import { formatMoney, normalizeEgyptianPhone } from '@/lib/domain/misc';
 import { brandTextColor } from '@/lib/domain/restaurant-brand';
 import type { PaymentMethod } from '@/lib/domain/order-machine';
-import type { PublicMenu, QuoteResponse } from '@/lib/types';
+import type { CustomerQuoteResponse, PublicMenu } from '@/lib/types';
 import { customerMessage } from './messages';
 import './customer.css';
 
 interface ApiError { error?: { code: string; message: string }; }
-interface QuoteState { key: string; data?: QuoteResponse; error?: string; }
+interface QuoteState { key: string; data?: CustomerQuoteResponse; error?: string; }
 
 export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
   const { locale, t } = useLanguage();
@@ -113,7 +113,7 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
           body: JSON.stringify({ items, promoCode, deliveryPointId: pointId }),
           signal: ctrl.signal,
         });
-        const data = await res.json() as QuoteResponse & ApiError;
+        const data = await res.json() as CustomerQuoteResponse & ApiError;
         if (disposed) return;
         setQuoteState(res.ok
           ? { key: requestKey, data }
@@ -231,15 +231,22 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
         <div className="checkout-fields">
           <section className="checkout-card">
             <div className="checkout-card-heading"><span className="checkout-section-number">01</span><div><h2>{t("اختياراتك", "Your choices")}</h2><p>{itemCount}{t(itemCount === 1 ? " صنف في طلبك" : " أصناف في طلبك", itemCount === 1 ? " item in your order" : " items in your order")}</p></div><Link className="checkout-edit-link" href={'/s/' + slug}>{t("ضيف حاجة كمان", "Add more")}</Link></div>
-            {lines.map((line) => {
+            {lines.map((line, index) => {
               const item = estimateLine(menu, line, locale);
               const product = menu.products.find((p) => p.id === line.productId);
+              // The quote is the price authority. This matters for rare
+              // piaster-rounding cases where independently rounded menu
+              // components do not add up to the cart-rounded total.
+              const quotedLine = quote?.lines[index];
+              const quotedLineTotal = quotedLine && quotedLine.productId === line.productId && quotedLine.variantId === line.variantId && quotedLine.quantity === line.quantity
+                ? quotedLine.lineTotal
+                : null;
               return <div key={line.key} className="checkout-cart-line">
                 <div className="checkout-line-title">{product?.imageUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={product.imageUrl} alt="" className="checkout-line-image" width={52} height={56} />
                 )}<div><h3>{item.name}</h3>{item.detail && <p>{item.detail}</p>}</div></div>
-                <strong className="checkout-line-price">{formatMoney(item.total, locale)}</strong>
+                <strong className="checkout-line-price">{quotedLineTotal === null ? '…' : formatMoney(quotedLineTotal, locale)}</strong>
                 <div className="checkout-line-actions">
                   <div className="quantity-control"><button type="button" disabled={submitting} onClick={() => setQuantity(line.key, line.quantity - 1)} aria-label={t("تقليل كمية ", "Decrease quantity of ") + item.name}><Minus size={14} /></button><output aria-label={t("كمية ", "Quantity of ") + item.name}>{line.quantity}</output><button type="button" disabled={submitting || line.quantity >= 50} onClick={() => setQuantity(line.key, line.quantity + 1)} aria-label={t("زيادة كمية ", "Increase quantity of ") + item.name}><Plus size={14} /></button></div>
                   <button type="button" className="remove-line-button" disabled={submitting} onClick={() => setQuantity(line.key, 0)} aria-label={t("حذف ", "Remove ") + item.name}><Trash2 size={12} />{t("حذف", "Remove")}</button>
@@ -292,7 +299,7 @@ export function Checkout({ menu: initialMenu }: { menu: PublicMenu }) {
             <h2 className="checkout-summary-heading"><ShoppingBag size={20} />{t("ملخص طلبك", "Your order summary")}</h2>
             {quote ? <>
               <div className="checkout-eta"><Clock3 size={25} strokeWidth={1.5} /><div><span>{menu.deliveryPoints.find((p) => p.id === pointId)?.kind === 'PICKUP' ? t("جاهز للاستلام من المطعم خلال", "Ready to collect in") : t("وقت الوصول المتوقع", "Estimated arrival")}</span><strong>{t("حوالي ", "About ")}{quote.etaMinutes}{t(" دقيقة", " minutes")}</strong><small>{t("تقدير بيتحدث حسب ضغط المطبخ؛ التوقيت يتأكد بعد قبول الطلب.", "This estimate changes with kitchen demand. Timing is confirmed when your order is accepted.")}</small></div></div>
-              <div className="checkout-money-rows"><MoneyRow label={t("قيمة الأصناف", "Items subtotal")} value={formatMoney(quote.subtotal, locale)} />{quote.discount > 0 && <MoneyRow label={t("خصم طلبك", "Your discount")} value={'− ' + formatMoney(quote.discount, locale)} discount />}{(quote.platformFeeAmount ?? 0) > 0 && <MoneyRow label={t("رسوم المنصة", "Platform fee") + ` (${(quote.platformFeeBps ?? 0) / 100}%)`} value={formatMoney(quote.platformFeeAmount ?? 0, locale)} />}<MoneyRow label={t("رسوم التوصيل", "Delivery fee")} value={quote.deliveryFee > 0 ? formatMoney(quote.deliveryFee, locale) : t("مجانًا", "Free")} /></div>
+              <div className="checkout-money-rows"><MoneyRow label={t("قيمة الأصناف", "Items subtotal")} value={formatMoney(quote.subtotal, locale)} />{quote.discount > 0 && <MoneyRow label={t("خصم طلبك", "Your discount")} value={'− ' + formatMoney(quote.discount, locale)} discount />}<MoneyRow label={t("رسوم التوصيل", "Delivery fee")} value={quote.deliveryFee > 0 ? formatMoney(quote.deliveryFee, locale) : t("مجانًا", "Free")} /></div>
               <div className="checkout-grand-total"><span>{t("الإجمالي", "Total")}</span><strong>{formatMoney(quote.total, locale)}</strong></div>
               {quote.minOrderShortfall > 0 && <p className="checkout-submit-hint">{t("الحد الأدنى ", "Minimum order ")}{formatMoney(quote.minOrderAmount, locale)}{t(". ضيف ", ". Add ")}{formatMoney(quote.minOrderShortfall, locale)}{t(" عشان تكمل.", " to continue.")}</p>}
             </> : quoteError ? <div className="quote-error" role="alert"><p>{customerMessage(quoteError, locale)}</p><button type="button" className="customer-secondary-button" disabled={submitting} onClick={() => setRefreshVersion((version) => version + 1)}>{t("تحديث حساب الطلب", "Refresh order total")}</button></div> :
