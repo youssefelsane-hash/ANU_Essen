@@ -43,7 +43,7 @@ async function resolveDeliveryPoint(d: Db, restaurantId: string, id?: string | n
 
 async function priceFor(d: Db, r: RestaurantRow, input: { items: CreateOrderInput['items']; promoCode?: string | null; deliveryPointId?: string | null }, now: Date, pricingMode: PricingMode = 'ONLINE_PLATFORM_FEE') {
   const point = await resolveDeliveryPoint(d, r.id, input.deliveryPointId);
-  const [catalog, promos] = await Promise.all([loadMenuCatalog(d, r.id), loadPromotionRules(d, r.id)]);
+  const [catalog, promos] = await Promise.all([loadMenuCatalog(d, r.id), loadPromotionRules(d, r.id, input.promoCode)]);
   const priced = priceCart(input.items, {
     products: catalog.products,
     addonGroups: catalog.addonGroups,
@@ -283,6 +283,11 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
       )) throw new AppError('STORE_PAUSED', closedMessage('PAUSED', 'CAPACITY'));
       if (!isCounter && phone) await enforcePhonePolicy(tx, phone, input.paymentMethod);
       if (input.promoCode && priced.promoError) throw new AppError('PROMO_INVALID', priced.promoError.message);
+      if (priced.promotion) {
+        // A personal voucher (ELSANE prize) works only for the phone that won it.
+        const [promo] = await tx.select({ customerPhone: promotions.customerPhone }).from(promotions).where(eq(promotions.id, priced.promotion.id));
+        if (promo?.customerPhone && promo.customerPhone !== phone) throw new AppError('PROMO_INVALID', 'الكود ده خاص برقم الموبايل اللي كسبه');
+      }
       if (!isCounter && priced.minOrderShortfall > 0) throw new AppError('MIN_ORDER', `الحد الأدنى للطلب ${egp(publishedFoodPrice(priced.minOrderAmount, priced.platformFeeBps))} ج.م`);
       // Admission is charged only for a new valid order, under the idempotency lock.
       // It commits with the order, so retries and rolled-back checkouts don't consume a phone allowance.

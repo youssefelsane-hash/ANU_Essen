@@ -31,6 +31,17 @@ export interface TimelineEntry {
 
 export type RefundStatus = 'REQUESTED' | 'COMPLETED' | 'REJECTED';
 
+export interface LoyaltyGame {
+  enabled: boolean;
+  reward: number;
+  minOrder: number;
+  letters: string[];
+  earned: string | null;
+  completedWord: boolean;
+  pending: boolean;
+  vouchers: { code: string; amount: number; expiresAt: number }[];
+}
+
 export interface RefundView {
   id: string;
   status: RefundStatus;
@@ -179,6 +190,8 @@ export interface TrackingView {
     /** Delivered and not rated yet (inside the review window). */
     canReview?: boolean;
     review?: { rating: number; comment: string | null; reply: string | null } | null;
+    /** "Collect ELSANE" game, when the restaurant plays it. */
+    loyalty?: LoyaltyGame | null;
   };
   restaurant: { nameAr: string; nameEn: string; phone: string | null; slug: string; timezone: string };
   instapay: { accountName: string | null; address: string | null; phone: string | null; link: string | null; instructions: string | null; instructionsEn?: string | null } | null;
@@ -219,6 +232,8 @@ export interface PublicMenu {
     minOrderAmount: number;
     requirePhone: boolean;
     rating?: { avg: number; count: number } | null;
+    /** "Collect ELSANE" game settings (null when the restaurant does not play). */
+    loyalty?: { reward: number; minOrder: number } | null;
   };
   /** Latest customer comments (with the restaurant's reply). */
   reviews?: { id: string; rating: number; comment: string | null; customerName: string; reply: string | null; createdAt: number }[];

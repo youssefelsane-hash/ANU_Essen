@@ -90,11 +90,20 @@ export async function loadMenuCatalog(d: Db, restaurantId: string): Promise<Menu
   return { products: productsMap, addonGroups: groupsMap };
 }
 
-export async function loadPromotionRules(d: Db, restaurantId: string): Promise<PromotionRule[]> {
+/**
+ * Active promotions. Personal vouchers (ELSANE prizes) are many and private, so only the one whose
+ * code the customer typed is loaded; the phone check happens when the order is placed.
+ */
+export async function loadPromotionRules(d: Db, restaurantId: string, promoCode?: string | null): Promise<PromotionRule[]> {
+  const code = promoCode?.trim().toUpperCase();
   const rows = await d
     .select()
     .from(promotions)
-    .where(and(eq(promotions.restaurantId, restaurantId), eq(promotions.isActive, true)));
+    .where(and(
+      eq(promotions.restaurantId, restaurantId),
+      eq(promotions.isActive, true),
+      code ? or(isNull(promotions.customerPhone), eq(promotions.code, code)) : isNull(promotions.customerPhone),
+    ));
   return rows.map((p) => ({
     id: p.id,
     name: p.name,
@@ -171,6 +180,7 @@ export async function loadPublicMenu(d: Db, slug: string, options: { customerPri
       minOrderAmount: customerPrices ? publishedFoodPrice(r.minOrderAmount, r.commissionBps) : r.minOrderAmount,
       requirePhone: r.requirePhone,
       rating: shown(ratings.get(r.id)),
+      loyalty: r.loyaltyEnabled ? { reward: r.loyaltyReward, minOrder: customerPrices ? publishedFoodPrice(r.loyaltyMinOrder, r.commissionBps) : r.loyaltyMinOrder } : null,
     },
     reviews: latestReviews.map((x) => ({ ...x, createdAt: x.createdAt.getTime() })),
     store: { status: live.status, reason: live.reason, etaMinutes: live.etaMinutes },

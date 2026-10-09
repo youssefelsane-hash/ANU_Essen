@@ -451,3 +451,4 @@ html[dir="ltr"] .restaurant-hero.has-image::after { background: linear-gradient(
 .store-review-stars { color: #d97706; letter-spacing: 1px; }
 .store-review-reply { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: #f5f2eb; font-size: 13px; }
 @media (max-width: 640px) { .store-reviews-list { grid-template-columns: 1fr; } }
+

@@ -7,6 +7,7 @@ import { localizedName } from '@/lib/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, Clock3, Check, ChefHat, Bike, MapPin, ShoppingBag, Copy, CheckCheck, RefreshCw, Phone, UtensilsCrossed, AlertCircle, X, Paperclip, Store, RotateCcw } from 'lucide-react';
 import { customerMessage } from './messages';
+import { ElsaneOrderCard } from './elsane';
 import './tracking.css';
 import { formatMoney, formatTime } from '@/lib/domain/misc';
 import { isTerminal, type OrderStatus } from '@/lib/domain/order-machine';
@@ -179,6 +180,7 @@ export function Tracking({ initial, token }: { initial: TrackingView; token: str
         {o.refundedTotal > 0 && <div className="tracking-bill-row is-discount"><span>{o.paymentStatus === 'REFUNDED' ? t("اترجعلك المبلغ كله", "Fully refunded to you") : t("اترجعلك", "Refunded to you")}</span><span>{formatMoney(o.refundedTotal, locale)}</span></div>}
         <div className="tracking-payment-method"><span>{o.paymentMethod === 'INSTAPAY' ? t('إنستاباي', 'InstaPay') : t("كاش عند الاستلام", "Cash on pickup")}</span>{o.paymentStatus === 'PAYMENT_VERIFIED' && <span><CheckCheck size={14} />{t("تم تأكيد الدفع", "Payment verified")}</span>}</div>
       </section>
+      {o.loyalty && <ElsaneOrderCard game={o.loyalty} slug={view.restaurant.slug} />}
       {(o.canReview || o.review) && <ReviewCard view={view} token={token} onDone={refreshFull} />}
       <RefundStatus refunds={refunds} canRequest={o.canRequestRefund} paymentMethod={o.paymentMethod} token={token} onDone={refreshFull} />
       {view.restaurant.phone && <a href={`tel:${view.restaurant.phone}`} className="tracking-contact"><Phone size={19} /><span><strong>{t("محتاج مساعدة في طلبك؟", "Need help with your order?")}</strong><small>{t("كلم المطعم مباشرة", "Call the restaurant directly")}</small></span><ArrowRight className="directional-arrow" size={17} /></a>}
