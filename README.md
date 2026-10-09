@@ -1,19 +1,19 @@
 # ANU Essen — Campus QR Ordering
 
 > منصة طلبات بالـ QR لطلاب جامعة الإسكندرية الأهلية. الطالب يعمل Scan → يختار من المنيو → يدفع InstaPay أو كاش → يتابع عداد الوقت → يستلم عند بوابة الباركينج.
-> المحل عنده شاشة مطبخ بتشتغل **حتى لو النت قطع**، وصاحب المنصة عنده لوحة كاملة للعمولة والإعدادات.
+> المحل عنده شاشة مطبخ بتشتغل **حتى لو النت قطع**، وصاحب المنصة عنده لوحة كاملة للحسابات الخاصة والإعدادات.
 
 First restaurant: **الراية الدمشقية**. Each restaurant has independent branding, menu, staff, payment settings, queue configuration and a permanent QR link.
 
-## Mobile operations and customer-funded fees — 8 October 2026
+## Mobile operations and pricing privacy — 8 October 2026
 
 - Phone-friendly kitchen and courier workspace: clear order number, customer name, tap-to-call phone, quantities and destination, compact navigation, and a large focus view.
 - Cash orders are accepted atomically into the kitchen queue; one **Ready** action is enough. Ready is never inferred from a timer. Kitchen capacity is checked under the store lock. Existing legacy cash orders can still be accepted manually.
 - Optional foreground screen-awake and sound controls. Browser audio needs one user gesture; background delivery of alerts is not guaranteed by a web page.
 - Restaurant owner/manager → **Restaurant appearance**: edit own Arabic/English name, logo, cover, color and text. Scope `store.profile` cannot change platform rates, service suspension or QR identity.
-- Platform owner → restaurant settings → **Online platform fee**. A restaurant price of EGP100 with a 5% rate becomes EGP105 for the online customer: EGP100 restaurant share + EGP5 platform share. Counter orders remain EGP100, with zero platform share.
-- Fees apply to discounted food and extras, exclude delivery, and are shown before checkout, in tracking and receipts. All totals are priced by the server.
-- Historical orders keep their original commission and totals. New orders freeze their mode/rate/fee; partial refunds allocate exact frozen shares with cumulative rounding.
+- Platform owner → restaurant settings → private online pricing controls. Customers see published online prices, while counter orders retain the restaurant's counter prices.
+- Checkout, tracking and receipts show food, discounts, delivery and the final total. All displayed totals are priced by the server.
+- Historical orders keep their original totals. New orders freeze their pricing snapshot; partial refunds use the frozen records with cumulative rounding.
 - Payment collection still uses the existing restaurant cash/InstaPay flow. Platform settlements are recorded manually; this does not split or transfer money automatically.
 - Counter quotes are authenticated and tenant-scoped. Uncertain counter submissions preserve the exact request/key for safe retry.
 - Platform → **Couriers**: create a courier and select exactly which restaurants they serve. A courier can work for one restaurant or several, without access to other restaurants.
@@ -49,7 +49,7 @@ See [the Arabic release report](docs/RELEASE_REPORT-ar.md) and [Vercel setup gui
 ```
 Student:   QR → Menu → Cart → Checkout → InstaPay / Cash → Order # → Live countdown → Delivered at the gate
 Merchant:  New order (sound) → Verify payment → Preparing → Ready → Out for delivery → Arrived → Completed → Receipt
-Platform:  Sales · commission ledger · settlements · queue engine · menus · staff · roles · audit log
+Platform:  Sales · private reconciliation · settlements · queue engine · menus · staff · roles · audit log
 ```
 
 ---
@@ -58,7 +58,7 @@ Platform:  Sales · commission ledger · settlements · queue engine · menus ·
 ## Operations quick reference
 
 - **Pickup at the restaurant:** every restaurant has a "Pickup at the restaurant" point next to its delivery points (the university gate stays the default). Pickup orders skip "out for delivery": ready → handed over at the counter; no delivery fee or travel time in the ETA; couriers don't see them.
-- **Counter orders (walk-ins):** Merchant → "Counter order" (permission `orders.create`: owner, manager, cashier). Big tap targets, optional name/phone, pickup preselected, cash or InstaPay awaiting explicit verification. The order goes straight into the kitchen queue with an ETA; a double tap records one order. Online-only rules (opening hours, pause, minimum order) don't apply at the counter; a platform suspension does. Counter orders always carry no platform fee. Cash orders enter the kitchen automatically; InstaPay requires explicit verification.
+- **Counter orders (walk-ins):** Merchant → "Counter order" (permission `orders.create`: owner, manager, cashier). Big tap targets, optional name/phone, pickup preselected, cash or InstaPay awaiting explicit verification. The order goes straight into the kitchen queue with an ETA; a double tap records one order. Online-only rules (opening hours, pause, minimum order) don't apply at the counter; a platform suspension does. Cash orders enter the kitchen automatically; InstaPay requires explicit verification.
 - **Suspend a restaurant:** Admin → Restaurant → Settings → "Suspend service" (with a reason). No new orders; customers and QR codes see a clear message; in-progress orders can be finished. "Resume service" undoes it.
 - **Block a person:** Admin → Team members → Block (or the owner: Staff → Block, for their own staff). Signs them out everywhere immediately.
 - **Returning customers:** the phone remembers name, phone, payment method and pickup point; "Order it again" refills the cart and opens a pre-filled checkout (2 taps).
@@ -87,7 +87,7 @@ src/
     domain/
       order-machine.ts     ← order state machine (single source of truth)
       queue.ts             ← Smart Queue & ETA engine
-      pricing.ts           ← cart pricing, promotions, commission
+      pricing.ts           ← cart pricing and promotions
       permissions.ts       ← RBAC catalogue + system roles
       hours.ts             ← opening hours / timezone math
       store-status.ts      ← OPEN / BUSY / PAUSED / CLOSED
@@ -226,11 +226,11 @@ Payment statuses: `UNPAID · PAYMENT_SUBMITTED · PAYMENT_VERIFIED · PAYMENT_RE
 
 ---
 
-## 7. Payments & commission
+## 7. Payments & private reconciliation
 
 - **InstaPay is verified manually** (no official API is assumed). The student sees the amount, the InstaPay address/phone (with copy buttons), "write `Order #A124` in the transfer note", an optional reference and an optional screenshot (compressed to ≤ 480 KB on the phone). Staff see it as *Waiting verification* and press **Confirm payment** or **Reject** (with a reason, which the student sees).
 - **Cash** can be enabled or disabled per restaurant. New cash orders enter the kitchen automatically after an atomic capacity check, and payment becomes *verified* on completion.
-- **Platform fees are a ledger.** Online orders snapshot their pricing mode, rate and added fee. `total = discounted food + delivery + platform fee`; `merchant_net = discounted food + delivery`. Counter orders have no platform fee; historical orders retain their original commission model. Changing a restaurant's rate never changes past orders. Sales count when an order is **completed**. *Settlements* record commission received. Admin → Commissions shows gross sales, commission, paid and outstanding per restaurant and period, plus orders per QR poster (`utm_source`).
+- **Platform reconciliation is immutable.** Online orders keep the pricing snapshot that applied when they were created, while published customer totals remain stable. Historical orders are never repriced. Sales count when an order is **completed**. Platform-only settlement records and reports are available to authorized platform finance users, including per-restaurant performance and QR-poster sources (`utm_source`).
 - Money is stored as integer piasters; currency is EGP.
 
 ## 8. Roles & permissions
@@ -256,11 +256,11 @@ The receipt is designed for 80 mm (or 58 mm) thermal printers using print CSS (`
 
 - Transactions plus row locks for order creation and every transition. Unique constraints cover order numbers, idempotency keys and client event ids.
 - **`Idempotency-Key`** on order creation: a double tap or retry returns the same order, and the same key with a different cart returns 422.
-- Snapshots: item names and prices, add-ons, discount, delivery point and commission are stored on the order.
+- Snapshots: item names and prices, add-ons, discounts and delivery details are stored on the order.
 - Sessions are HttpOnly SameSite cookies with sliding expiry. Passwords use scrypt. Login is rate-limited and timing-safe. Mutating API routes check the Origin header (CSRF), and server actions have Next.js built-in origin protection.
 - Rate limits: order creation per IP and per phone, payment submission, quotes and login.
 - Security headers (`X-Frame-Options`, `nosniff`, `Referrer-Policy`, a minimal CSP). Uploads are magic-byte checked. The tracking URL is an unguessable token (`/order/<token>`), not the order number.
-- Every important action is audit-logged with the actor, before/after values and the IP or device. This covers prices, availability, payment verify/reject, cancel, complete, commission, queue config, staff and roles, settlements, settings and logins.
+- Every important action is audit-logged with the actor, before/after values and the IP or device. This covers prices, availability, payment verify/reject, cancel, complete, private finance actions, queue config, staff and roles, settlements, settings and logins.
 - Structured JSON logs and an `x-request-id` header on API responses. `/api/health` reports liveness and `/api/ready` checks the database. To plug in Sentry or similar, call `setErrorReporter()` in `src/server/log.ts`.
 - All timestamps are `timestamptz` (UTC). Display, opening hours, "today" reports and promotion windows use the restaurant's timezone (`Africa/Cairo`, DST-aware).
 
@@ -269,12 +269,12 @@ The receipt is designed for 80 mm (or 58 mm) thermal printers using print CSS (`
 `npm test` covers:
 - `queue.test.ts`: the spec's load→prep table (25→7, 35→8, 48→10, 55→12…), config-driven, ETA math, load levels
 - `order-machine.test.ts`: allowed and forbidden transitions, actor rules, payment status
-- `pricing.test.ts`: variants, add-ons, availability, promo codes and limits, the spec's commission example (200−20=180 → 9 → net 171)
+- `pricing.test.ts`: variants, add-ons, availability, promo codes and limits
 - `hours.test.ts`: overnight hours, DST, local day boundaries, phone normalisation, order numbers
-- `platform-pricing.test.ts`, `pricing-migration.test.ts`: added online fees, counter exemption, promo consistency, partial refunds and unchanged historical totals
+- `platform-pricing.test.ts`, `pricing-migration.test.ts`: online and counter pricing, promo consistency, partial refunds and unchanged historical totals
 - `counter-draft.test.ts`, `merchant-brand.test.ts`, `origin-security.test.ts`: safe uncertain retries, tenant-scoped appearance and exact-origin checks
-- `integration.test.ts`: idempotent creation (sequential and concurrent), price and commission snapshots, pause and capacity, promo usage limits, payment verification and ETA from load, offline action idempotency and timestamps, missed-order sync by cursor, delivery and kitchen visibility, cross-restaurant permission isolation, unpaid expiry
-- `acceptance.test.ts`: the full 26-step acceptance scenario, from QR to commission in the admin dashboard
+- `integration.test.ts`: idempotent creation (sequential and concurrent), price snapshots, pause and capacity, promo usage limits, payment verification and ETA from load, offline action idempotency and timestamps, missed-order sync by cursor, delivery and kitchen visibility, cross-restaurant permission isolation, unpaid expiry
+- `acceptance.test.ts`: the full 26-step acceptance scenario, from QR to platform reporting
 - `reliability.test.ts`: cart-aware ETA, deadlines, action replay, concurrent promo retries, tenant identity and safe payment links
 - `cart-offline.test.ts`: damaged storage, unavailable selections and shared-terminal cache isolation
 - `restaurant-identity.test.ts`: isolated branding, stable redirects and independent QR round-trip decoding
@@ -316,7 +316,7 @@ npm run test:couriers -- --report=work/shared-courier-results.json
 
 It checks restaurant and session isolation, a 100-attempt single-job claim race, another courier’s delivery denial, 20 repeated hand-ins/reversals, exact balances and overpayment protection. It requires a local production app plus a local database and cleans up its fixtures.
 
-On 9 October 2026 the local production build passed 100 simultaneous online checkouts (p95 843.5 ms) and 100 simultaneous counter checkouts (p95 996.3 ms), with zero unexpected errors or duplicates. Online fees, counter fee exemption, direct Ready/hand-over, replay, sync, accounting and full-kitchen rejection were checked. These measurements do not establish hosted Vercel cold-start, sustained load or real-network capacity. New CASH orders reserve confirmed kitchen capacity atomically; pending InstaPay payments do not reserve capacity, and manual payment verification retains the existing staff admission policy.
+On 9 October 2026 the local production build passed 100 simultaneous online checkouts (p95 843.5 ms) and 100 simultaneous counter checkouts (p95 996.3 ms), with zero unexpected errors or duplicates. Online and counter pricing, direct Ready/hand-over, replay, sync, accounting and full-kitchen rejection were checked. These measurements do not establish hosted Vercel cold-start, sustained load or real-network capacity. New CASH orders reserve confirmed kitchen capacity atomically; pending InstaPay payments do not reserve capacity, and manual payment verification retains the existing staff admission policy.
 
 Observed local validation: 24 same-key requests created one order, 24 final-promo retries consumed one allowance, 12 action retries applied once, and concurrent traffic yielded 80 unique, gap-free events. This is a short burst test, not a sustained load or network-failure benchmark.
 

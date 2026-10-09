@@ -215,7 +215,10 @@ async function cashHistory(d: Db, restaurantId?: string) {
 export async function merchantCourierOverview(d: Db, auth: AuthContext, restaurantId: string) {
   z.uuid().parse(restaurantId);
   requireCashManagement(auth, restaurantId);
-  const [balances, handIns] = await Promise.all([courierAccounting(d, restaurantId), cashHistory(d, restaurantId)]);
+  const [rawBalances, handIns] = await Promise.all([courierAccounting(d, restaurantId), cashHistory(d, restaurantId)]);
+  // Restaurant-side cash screens need collection totals, never the platform's
+  // internal share of those totals.
+  const balances = rawBalances.map(({ platformShare: _platformShare, merchantShare: _merchantShare, ...balance }) => balance);
   return { balances, handIns };
 }
 
@@ -258,6 +261,5 @@ export async function courierCashReport(d: Db, auth: AuthContext, restaurantId: 
     cashCollected: balance?.cashCollected ?? 0, cashOutstanding: balance?.outstanding ?? 0,
     ordersCompleted: balance?.delivered ?? 0, cashPending: balance?.cashPending ?? 0,
     handedIn: balance?.handedIn ?? 0, cashRefunds: balance?.cashRefunds ?? 0,
-    merchantShare: balance?.merchantShare ?? 0, platformShare: balance?.platformShare ?? 0,
   };
 }

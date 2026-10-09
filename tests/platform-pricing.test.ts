@@ -1,11 +1,12 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { priceCart, type PricingContext } from '@/lib/domain/pricing';
+import { publishedFoodPrice } from '@/lib/domain/customer-pricing';
 import { primaryActionFor } from '@/lib/domain/order-machine';
 import type { CreateOrderInput } from '@/lib/validation';
 import * as s from '@/server/db/schema';
 import { AppError } from '@/server/errors';
-import { createCounterOrder, createOrder, quote, quoteCounterOrder } from '@/server/services/checkout';
+import { createCounterOrder, createOrder, quote, quoteCounterOrder, toCustomerQuote } from '@/server/services/checkout';
 import { applyOrderAction, type ActionActor } from '@/server/services/order-actions';
 import { recordRefund } from '@/server/services/refunds';
 import { loadOrderSnapshots, loadTrackingView } from '@/server/services/order-views';
@@ -61,8 +62,16 @@ describe('customer funded online fees', () => {
     expect(events[0]).toMatchObject({ toStatus: 'CONFIRMED', data: { autoAccepted: true, platformFeeAmount: 500 } });
     expect(primaryActionFor('CONFIRMED')).toBe('MARK_READY');
     const menu = (await loadPublicMenu(fixture.d, 'alrayez'))!;
-    expect(menu.restaurant.platformFeeBps).toBe(500);
-    expect(menu.products.find((p) => p.id === productId)?.basePrice).toBe(10000);
+    const counterMenu = (await loadPublicMenu(fixture.d, 'alrayez', { customerPrices: false }))!;
+    const customerQuote = toCustomerQuote(q);
+    expect(menu.restaurant).not.toHaveProperty('platformFeeBps');
+    expect(menu.products.find((p) => p.id === productId)?.basePrice).toBe(10500);
+    expect(counterMenu.products.find((p) => p.id === productId)?.basePrice).toBe(10000);
+    expect(customerQuote).not.toHaveProperty('pricingMode');
+    expect(customerQuote).not.toHaveProperty('platformFeeAmount');
+    expect(customerQuote).not.toHaveProperty('platformFeeBps');
+    expect(customerQuote.subtotal - customerQuote.discount + customerQuote.deliveryFee).toBe(customerQuote.total);
+    expect(customerQuote.lines.reduce((sum, line) => sum + line.lineTotal, 0)).toBe(customerQuote.subtotal);
     await complete(o.orderId);
   });
 
@@ -82,6 +91,19 @@ describe('customer funded online fees', () => {
     await complete(o.orderId);
   });
 
+  it('uses the published customer minimum in both the quote and checkout rejection', async () => {
+    const [before] = await fixture.d.select().from(s.restaurants).where(eq(s.restaurants.id, fixture.demo.restaurantId));
+    await fixture.d.update(s.restaurants).set({ minOrderAmount: 20000 }).where(eq(s.restaurants.id, fixture.demo.restaurantId));
+    try {
+      const customerQuote = toCustomerQuote(await quote('alrayez', input()));
+      expect(customerQuote).toMatchObject({ minOrderAmount: 21000, minOrderShortfall: 10500 });
+      await expect(createOrder('alrayez', input(), key())).rejects.toSatisfy((error: unknown) =>
+        error instanceof AppError && error.code === 'MIN_ORDER' && error.message === 'الحد الأدنى للطلب 210 ج.م');
+    } finally {
+      await fixture.d.update(s.restaurants).set({ minOrderAmount: before.minOrderAmount }).where(eq(s.restaurants.id, fixture.demo.restaurantId));
+    }
+  });
+
   it('prices variants and addons, applies the discount first, and excludes delivery from the percentage', () => {
     const context: PricingContext = {
       pricingMode: 'ONLINE_PLATFORM_FEE', commissionBps: 500, now: new Date(), deliveryFee: 500, minOrderAmount: 0,
@@ -98,6 +120,31 @@ describe('customer funded online fees', () => {
     expect(free).toMatchObject({ discount: 2000, platformFeeAmount: 0, total: 500, merchantNet: 500 });
   });
 
+  it('gives the customer an authoritative cart quote when independently rounded menu components differ by a piaster', () => {
+    const raw = {
+      pricingMode: 'ONLINE_PLATFORM_FEE' as const,
+      platformFeeAmount: 300,
+      platformFeeBps: 500,
+      lines: [{
+        productId: 'item', variantId: 'large', nameAr: 'صنف', nameEn: 'Item', variantNameAr: 'كبير', variantNameEn: 'Large',
+        addons: [{ nameAr: 'إضافة', nameEn: 'Addon', price: 333 }], unitPrice: 2000, addonsPerUnit: 333, quantity: 3, lineTotal: 6999,
+      }],
+      subtotal: 6999, discount: 1000, promotion: null, promoError: null, deliveryFee: 500, total: 6799,
+      minOrderAmount: 0, minOrderShortfall: 0, etaMinutes: 20,
+    };
+    const customerQuote = toCustomerQuote(raw);
+    // Per-component menu rounding is 21.00 + 3.50, repeated three times = 73.50.
+    // The order is rounded once after pricing, so the quote is 73.49. The basket
+    // and checkout must render this quote, never a locally recomputed total.
+    expect((publishedFoodPrice(2000, 500) + publishedFoodPrice(333, 500)) * 3).toBe(7350);
+    expect(customerQuote.lines[0]?.lineTotal).toBe(7349);
+    expect(customerQuote.lines[0]?.addons[0].price).toBe(350);
+    expect(customerQuote.lines[0]?.addonsPerUnit).toBe(350);
+    expect(customerQuote.lines[0]?.unitPrice).toBe(2100);
+    expect(customerQuote.subtotal).toBe(7349);
+    expect(customerQuote.subtotal - customerQuote.discount + customerQuote.deliveryFee).toBe(customerQuote.total);
+  });
+
   it('freezes price, fee rate and merchant share when prices or platform settings change', async () => {
     const requestKey = key(), body = input();
     const o = await createOrder('alrayez', body, requestKey);
@@ -108,9 +155,16 @@ describe('customer funded online fees', () => {
       expect((await createOrder('alrayez', body, requestKey)).total).toBe(10500);
       const row = await rowFor(o.orderId);
       expect(row).toMatchObject({ commissionBps: 500, platformFeeAmount: 500, merchantNet: 10000, total: 10500 });
-      const [snap] = await loadOrderSnapshots(fixture.d, [o.orderId], { includePhone: true });
+      const [merchantSnapshot] = await loadOrderSnapshots(fixture.d, [o.orderId], { includePhone: true });
+      const [platformSnapshot] = await loadOrderSnapshots(fixture.d, [o.orderId], { includePhone: true, includePlatformPricing: true });
       const tracking = (await loadTrackingView(fixture.d, o.trackingToken))!;
-      for (const view of [snap, tracking.order]) expect(view).toMatchObject({ pricingMode: 'ONLINE_PLATFORM_FEE', platformFeeAmount: 500, platformFeeBps: 500, total: 10500 });
+      expect(platformSnapshot).toMatchObject({ pricingMode: 'ONLINE_PLATFORM_FEE', platformFeeAmount: 500, platformFeeBps: 500, total: 10500 });
+      for (const view of [merchantSnapshot, tracking.order]) {
+        expect(view).not.toHaveProperty('pricingMode');
+        expect(view).not.toHaveProperty('platformFeeAmount');
+        expect(view).not.toHaveProperty('platformFeeBps');
+        expect(view.subtotal - view.discountTotal + view.deliveryFee).toBe(view.total);
+      }
     } finally {
       await fixture.d.update(s.restaurants).set({ commissionBps: 500 }).where(eq(s.restaurants.id, fixture.demo.restaurantId));
       await fixture.d.update(s.products).set({ basePrice: 10000 }).where(eq(s.products.id, productId));

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { commissionFor, priceCart, PricingError, type MenuAddonGroup, type MenuProduct, type PricingContext, type PromotionRule } from '@/lib/domain/pricing';
+import { localizeMessage } from '@/lib/i18n';
 
 const shawarma: MenuProduct = {
   id: 'p1', nameAr: 'شاورما', nameEn: 'Shawarma', basePrice: 6000, isAvailable: true, isActive: true, prepLoadUnits: 1,
@@ -75,7 +76,10 @@ describe('pricing', () => {
     const code = (p: Partial<PromotionRule>) => priceCart(lines, ctx({ promotions: [promo({ code: 'X', ...p })], promoCode: 'x' }));
     expect(code({}).discount).toBe(1400);
     expect(code({ maxDiscount: 1000 }).discount).toBe(1000);
-    expect(code({ minSubtotal: 20000 }).promoError?.code).toBe('MIN_SUBTOTAL');
+    expect(code({ minSubtotal: 20000 }).promoError).toEqual({
+      code: 'MIN_SUBTOTAL',
+      message: 'قيمة طلبك أقل من الحد الأدنى للعرض. ضيف أصناف وجرب الكود تاني.',
+    });
     expect(code({ endsAt: new Date('2026-10-01T00:00:00Z') }).promoError?.code).toBe('EXPIRED');
     expect(code({ usageLimit: 5, usedCount: 5 }).promoError?.code).toBe('USAGE_LIMIT');
     expect(priceCart(lines, ctx({ promoCode: 'NOPE' })).promoError?.code).toBe('INVALID_CODE');
@@ -91,6 +95,18 @@ describe('pricing', () => {
     // product: 2 × 10 = 20 EGP vs 5% of 260 = 13 EGP
     expect(cart.discount).toBe(2000);
     expect(cart.promotion?.id).toBe('a');
+  });
+
+  it('keeps the offer minimum message clear in both languages without exposing a base-price threshold', () => {
+    const cart = priceCart([{ productId: 'p2', quantity: 1 }], ctx({
+      pricingMode: 'ONLINE_PLATFORM_FEE',
+      promotions: [promo({ code: 'MINIMUM', minSubtotal: 20000 })],
+      promoCode: 'MINIMUM',
+    }));
+    const message = cart.promoError!.message;
+    expect(localizeMessage(message, 'ar')).toBe('قيمة طلبك أقل من الحد الأدنى للعرض. ضيف أصناف وجرب الكود تاني.');
+    expect(localizeMessage(message, 'en')).toBe('Your basket is below the offer minimum. Add items and try the code again.');
+    expect(message).not.toMatch(/\d/);
   });
 
   it('reports the min-order shortfall', () => {

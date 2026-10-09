@@ -1,12 +1,14 @@
 import { formatDateTime, formatMoney } from './domain/misc';
 import { labels, localizedName, text, type Locale } from './i18n';
 import type { OrderSnapshot } from './types';
+import { redactOrderPricing } from './domain/customer-pricing';
 
 /**
  * Plain-text receipt (fixed width) for raw/ESC-POS printing integrations (QZ Tray, PrintNode,
  * a local print bridge). 80mm paper ≈ 42 columns, 58mm ≈ 32 columns.
  */
 export function receiptText(order: OrderSnapshot, restaurantName: string, timeZone: string, columns = 42, locale: Locale = 'en'): string {
+  order = redactOrderPricing(order);
   const t = (ar: string, en: string) => text(locale, ar, en);
   const copy = labels(locale);
   const line = '-'.repeat(columns);
@@ -31,7 +33,6 @@ export function receiptText(order: OrderSnapshot, restaurantName: string, timeZo
   }
   out.push(line, row(t('المجموع', 'Subtotal'), formatMoney(order.subtotal, locale)));
   if (order.discountTotal) out.push(row(t('الخصم', 'Discount'), `-${formatMoney(order.discountTotal, locale)}`));
-  if (order.platformFeeAmount) out.push(row(t('رسوم المنصة', 'Platform fee'), formatMoney(order.platformFeeAmount, locale)));
   if (order.deliveryFee) out.push(row(t('التوصيل', 'Delivery'), formatMoney(order.deliveryFee, locale)));
   out.push(row(t('الإجمالي', 'TOTAL'), formatMoney(order.total, locale)));
   if (order.refundedTotal) out.push(row(t('مسترد للعميل', 'Refunded'), `-${formatMoney(order.refundedTotal, locale)}`));

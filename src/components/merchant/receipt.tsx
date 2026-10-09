@@ -7,8 +7,10 @@ import { formatDateTime, formatMoney } from '@/lib/domain/misc';
 import { useLanguage } from '@/components/language-provider';
 import { labels, localizedName } from '@/lib/i18n';
 import type { OrderSnapshot } from '@/lib/types';
+import { redactOrderPricing } from '@/lib/domain/customer-pricing';
 
 export function Receipt({ order, restaurantName, timezone }: { order: OrderSnapshot; restaurantName: string; timezone: string }) {
+  order = redactOrderPricing(order);
   const { locale, t } = useLanguage();
   const copy = labels(locale);
   const paid = ['PAYMENT_VERIFIED', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(order.paymentStatus);
@@ -40,7 +42,6 @@ export function Receipt({ order, restaurantName, timezone }: { order: OrderSnaps
       <hr />
       <div className="row"><span>{t('المجموع', 'Subtotal')}</span><span>{formatMoney(order.subtotal, locale)}</span></div>
       {order.discountTotal > 0 && <div className="row"><span>{t('الخصم', 'Discount')}</span><span>-{formatMoney(order.discountTotal, locale)}</span></div>}
-      {(order.platformFeeAmount ?? 0) > 0 && <div className="row"><span>{t('رسوم المنصة', 'Platform fee')}</span><span>{formatMoney(order.platformFeeAmount ?? 0, locale)}</span></div>}
       {order.deliveryFee > 0 && <div className="row"><span>{t('التوصيل', 'Delivery')}</span><span>{formatMoney(order.deliveryFee, locale)}</span></div>}
       <div className="row" style={{ fontWeight: 800, fontSize: '14px' }}><span>{t('الإجمالي', 'Total')}</span><span>{formatMoney(order.total, locale)}</span></div>
       {refunded > 0 && <div className="row"><span>{t('مسترد للعميل', 'Refunded')}</span><span>-{formatMoney(refunded, locale)}</span></div>}

@@ -82,7 +82,7 @@ describe('order creation', () => {
     const o = await createOrder(SLUG, input(), key());
     await d.update(s.productVariants).set({ price: 9000 }).where(eq(s.productVariants.id, demo.variantIds['Chicken Shawarma Sandwich:Regular']));
     await d.update(s.restaurants).set({ commissionBps: 1000 }).where(eq(s.restaurants.id, demo.restaurantId));
-    const [snap] = await loadOrderSnapshots(d, [o.orderId], { includePhone: true });
+    const [snap] = await loadOrderSnapshots(d, [o.orderId], { includePhone: true, includePlatformPricing: true });
     expect(snap.items[0].unitPrice).toBe(6000);
     expect(snap.total).toBe(18900);
     const [row] = await d.select().from(s.orders).where(eq(s.orders.id, o.orderId));

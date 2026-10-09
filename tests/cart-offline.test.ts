@@ -33,6 +33,7 @@ describe('saved carts and shared terminals', () => {
 
   it('isolates an owner cache and pending outbox from another user, restaurant or permission set', () => {
     const owner = merchantCacheKey('store-a', 'owner', ['orders.view', 'payments.verify']);
+    expect(owner).toBe('merchant:v2:store-a:owner:orders.view,payments.verify');
     expect(owner).toBe(merchantCacheKey('store-a', 'owner', ['payments.verify', 'orders.view']));
     expect(owner).not.toBe(merchantCacheKey('store-a', 'delivery', ['orders.delivery']));
     expect(owner).not.toBe(merchantCacheKey('store-b', 'owner', ['orders.view', 'payments.verify']));

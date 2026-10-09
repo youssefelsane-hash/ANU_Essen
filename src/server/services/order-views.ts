@@ -13,6 +13,7 @@ import {
   users,
 } from '../db/schema';
 import type { OrderSnapshot, RefundView, SnapshotItem, TimelineEntry, TrackingView } from '../../lib/types';
+import { customerPriceTotals, publishLinePrices } from '../../lib/domain/customer-pricing';
 import { expireUnpaidOrder } from './order-actions';
 import { canCustomerRequestRefund } from './refunds';
 
@@ -80,6 +81,8 @@ async function loadRefunds(d: Db, orderIds: string[], withPayout: boolean): Prom
 
 export interface SnapshotOptions {
   includePhone: boolean;
+  /** Platform finance views keep their internal pricing breakdown. */
+  includePlatformPricing?: boolean;
 }
 
 /** Full order snapshots for merchant devices (batch-loaded; no N+1). */
@@ -118,6 +121,16 @@ export async function loadOrderSnapshots(d: Db, orderIds: string[], opts: Snapsh
 
   return orderRows.map((o) => {
     const payment = paymentRows.find((p) => p.orderId === o.id);
+    const rawItems = itemsByOrder.get(o.id) ?? [];
+    const customerTotals = customerPriceTotals({
+      pricingMode: o.pricingMode,
+      subtotal: o.subtotal,
+      discount: o.discountTotal,
+      deliveryFee: o.deliveryFee,
+      total: o.total,
+      platformFeeAmount: o.platformFeeAmount,
+      platformFeeBps: o.pricingMode === 'ONLINE_PLATFORM_FEE' ? o.commissionBps : 0,
+    });
     const timeline: TimelineEntry[] = eventRows
       .filter((e) => e.orderId === o.id)
       .map((e) => ({
@@ -145,13 +158,15 @@ export async function loadOrderSnapshots(d: Db, orderIds: string[], opts: Snapsh
       deliveryPointNameEn: o.deliveryPointNameEn,
       fulfillment: o.fulfillment,
       channel: o.channel,
-      items: itemsByOrder.get(o.id) ?? [],
-      pricingMode: o.pricingMode,
-      platformFeeAmount: o.platformFeeAmount,
-      platformFeeBps: o.pricingMode === 'ONLINE_PLATFORM_FEE' ? o.commissionBps : 0,
-      subtotal: o.subtotal,
-      discountTotal: o.discountTotal,
-      deliveryFee: o.deliveryFee,
+      items: opts.includePlatformPricing ? rawItems : publishLinePrices(rawItems, customerTotals.addedToFood, o.pricingMode === 'ONLINE_PLATFORM_FEE' ? o.commissionBps : 0),
+      ...(opts.includePlatformPricing ? {
+        pricingMode: o.pricingMode,
+        platformFeeAmount: o.platformFeeAmount,
+        platformFeeBps: o.pricingMode === 'ONLINE_PLATFORM_FEE' ? o.commissionBps : 0,
+      } : {}),
+      subtotal: opts.includePlatformPricing ? o.subtotal : customerTotals.subtotal,
+      discountTotal: opts.includePlatformPricing ? o.discountTotal : customerTotals.discount,
+      deliveryFee: customerTotals.deliveryFee,
       total: o.total,
       currency: o.currency,
       promoCode: o.promoCode,
@@ -209,6 +224,16 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
       instructionsEn: c.instructionsEn ?? null,
     };
   }
+  const customerTotals = customerPriceTotals({
+    pricingMode: o.pricingMode,
+    subtotal: o.subtotal,
+    discount: o.discountTotal,
+    deliveryFee: o.deliveryFee,
+    total: o.total,
+    platformFeeAmount: o.platformFeeAmount,
+    platformFeeBps: o.pricingMode === 'ONLINE_PLATFORM_FEE' ? o.commissionBps : 0,
+  });
+  const rawItems = itemsByOrder.get(o.id) ?? [];
   return {
     serverTime: Date.now(),
     order: {
@@ -223,13 +248,10 @@ export async function loadTrackingView(d: Db, token: string): Promise<TrackingVi
       deliveryPointName: o.deliveryPointName,
       deliveryPointNameEn: o.deliveryPointNameEn,
       fulfillment: o.fulfillment,
-      items: itemsByOrder.get(o.id) ?? [],
-      pricingMode: o.pricingMode,
-      platformFeeAmount: o.platformFeeAmount,
-      platformFeeBps: o.pricingMode === 'ONLINE_PLATFORM_FEE' ? o.commissionBps : 0,
-      subtotal: o.subtotal,
-      discountTotal: o.discountTotal,
-      deliveryFee: o.deliveryFee,
+      items: publishLinePrices(rawItems, customerTotals.addedToFood, o.pricingMode === 'ONLINE_PLATFORM_FEE' ? o.commissionBps : 0),
+      subtotal: customerTotals.subtotal,
+      discountTotal: customerTotals.discount,
+      deliveryFee: customerTotals.deliveryFee,
       total: o.total,
       estimatedReadyAt: ms(o.estimatedReadyAt),
       estimatedArrivalAt: ms(o.estimatedArrivalAt),

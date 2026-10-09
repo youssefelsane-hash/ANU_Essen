@@ -268,7 +268,7 @@ export function promotionDiscount(promo: PromotionRule, lines: readonly PricedLi
   return Math.max(0, Math.min(discount, subtotal));
 }
 
-function promoErrorMessage(code: PromoErrorCode, promo?: PromotionRule): string {
+function promoErrorMessage(code: PromoErrorCode): string {
   switch (code) {
     case 'INVALID_CODE':
       return 'الكود غير صحيح';
@@ -279,7 +279,7 @@ function promoErrorMessage(code: PromoErrorCode, promo?: PromotionRule): string 
     case 'USAGE_LIMIT':
       return 'الكود استُخدم بالكامل';
     case 'MIN_SUBTOTAL':
-      return `الحد الأدنى لاستخدام الكود ${egp(promo?.minSubtotal ?? 0)} ج.م`;
+      return 'قيمة طلبك أقل من الحد الأدنى للعرض. ضيف أصناف وجرب الكود تاني.';
     case 'NOT_APPLICABLE':
       return 'الكود لا ينطبق على طلبك';
   }
@@ -313,7 +313,7 @@ export function priceCart(input: readonly CartLineInput[], ctx: PricingContext):
     } else {
       const reason = promotionIneligibility(promo, subtotal, ctx.now);
       const discount = reason ? 0 : promotionDiscount(promo, lines, subtotal);
-      if (reason) promoError = { code: reason, message: promoErrorMessage(reason, promo) };
+      if (reason) promoError = { code: reason, message: promoErrorMessage(reason) };
       else if (discount <= 0) promoError = { code: 'NOT_APPLICABLE', message: promoErrorMessage('NOT_APPLICABLE') };
       else candidates.push({ promo, discount });
     }

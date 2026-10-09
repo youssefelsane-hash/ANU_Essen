@@ -64,6 +64,7 @@ const MESSAGES: [string, string][] = [
   ['انتهت مهلة الدفع، ابدأ طلبًا جديدًا', 'The payment time has expired. Start a new order.'], ['الطلب أونلاين من المطعم ده متوقف مؤقتًا', 'Online ordering is temporarily unavailable at this restaurant'],
   ['طلبات كتير في وقت قصير، استنى شوية وحاول تاني', 'Too many requests. Wait a moment and try again'],
   ['الكود غير صحيح', 'This code is invalid'], ['الكود لم يبدأ بعد', 'This offer has not started yet'], ['الكود منتهي', 'This code has expired'], ['الكود استُخدم بالكامل', 'This code has reached its usage limit'], ['الكود لا ينطبق على طلبك', 'This offer does not apply to your order'],
+  ['قيمة طلبك أقل من الحد الأدنى للعرض. ضيف أصناف وجرب الكود تاني.', 'Your basket is below the offer minimum. Add items and try the code again.'],
   ['الكمية غير صحيحة', 'Invalid quantity'], ['منتج في السلة لم يعد موجودًا في المنيو', 'An item in your basket is no longer on the menu'],
   ['المطعم مقفول حاليًا', 'The restaurant is currently closed'], ['الطلبات متوقفة مؤقتًا بسبب ضغط الطلبات', 'Ordering is paused while the kitchen catches up'], ['الطلبات متوقفة مؤقتًا', 'Ordering is temporarily paused'], ['المطعم خارج مواعيد العمل', 'The restaurant is outside its opening hours'],
   ['الطلب ده مع مسؤول توصيل تاني', 'This delivery is assigned to someone else'], ['حالة الطلب اتغيّرت. حدّث الشاشة وحاول تاني.', 'The order has changed. Refresh and try again.'],

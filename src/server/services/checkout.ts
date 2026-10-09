@@ -21,7 +21,8 @@ import { formatOrderNumber, normalizeEgyptianPhone } from '../../lib/domain/misc
 import { acceptsOrders } from '../../lib/domain/store-status';
 import { computeEta } from '../../lib/domain/queue';
 import type { CreateOrderInput } from '../../lib/validation';
-import type { QuoteResponse } from '../../lib/types';
+import type { CustomerQuoteResponse, QuoteResponse } from '../../lib/types';
+import { customerPriceTotals, publishLinePrices, publishedFoodPrice } from '../../lib/domain/customer-pricing';
 import { loadMenuCatalog, loadPromotionRules } from './menu';
 import { audit } from './audit';
 import { hasPermission, type AuthzSnapshot } from '../../lib/domain/permissions';
@@ -83,6 +84,36 @@ function toQuote(priced: PricedCart, etaMinutes: number): QuoteResponse {
     minOrderAmount: priced.minOrderAmount,
     minOrderShortfall: priced.minOrderShortfall,
     etaMinutes,
+  };
+}
+
+/**
+ * Customer receipts use the published all-in food price. The accounting split
+ * is deliberately absent from the public API and the displayed math remains
+ * subtotal − discount + delivery = total.
+ */
+export function toCustomerQuote(quote: QuoteResponse): CustomerQuoteResponse {
+  const totals = customerPriceTotals({
+    pricingMode: quote.pricingMode,
+    subtotal: quote.subtotal,
+    discount: quote.discount,
+    deliveryFee: quote.deliveryFee,
+    total: quote.total,
+    platformFeeAmount: quote.platformFeeAmount,
+    platformFeeBps: quote.platformFeeBps,
+  });
+  const { pricingMode: _pricingMode, platformFeeAmount: _platformFeeAmount, platformFeeBps: _platformFeeBps, ...publicQuote } = quote;
+  const rate = quote.pricingMode === 'ONLINE_PLATFORM_FEE' ? quote.platformFeeBps ?? 0 : 0;
+  const minOrderAmount = rate ? publishedFoodPrice(quote.minOrderAmount, rate) : quote.minOrderAmount;
+  return {
+    ...publicQuote,
+    lines: publishLinePrices(quote.lines, totals.addedToFood, rate),
+    subtotal: totals.subtotal,
+    discount: totals.discount,
+    deliveryFee: totals.deliveryFee,
+    total: totals.total,
+    minOrderAmount,
+    minOrderShortfall: Math.max(0, minOrderAmount - totals.subtotal),
   };
 }
 
@@ -241,7 +272,7 @@ async function createOrderFor(r: RestaurantRow, input: CreateOrderInput, idempot
         (cfg.maxActiveOrders > 0 && currentLive.activeOrders + 1 > cfg.maxActiveOrders)
       )) throw new AppError('STORE_PAUSED', closedMessage('PAUSED', 'CAPACITY'));
       if (input.promoCode && priced.promoError) throw new AppError('PROMO_INVALID', priced.promoError.message);
-      if (!isCounter && priced.minOrderShortfall > 0) throw new AppError('MIN_ORDER', `الحد الأدنى للطلب ${egp(priced.minOrderAmount)} ج.م`);
+      if (!isCounter && priced.minOrderShortfall > 0) throw new AppError('MIN_ORDER', `الحد الأدنى للطلب ${egp(publishedFoodPrice(priced.minOrderAmount, priced.platformFeeBps))} ج.م`);
       // Admission is charged only for a new valid order, under the idempotency lock.
       // It commits with the order, so retries and rolled-back checkouts don't consume a phone allowance.
       if (opts.admit) await opts.admit(tx);
